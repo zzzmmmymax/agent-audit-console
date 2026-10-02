@@ -11,6 +11,7 @@ builds:
     main: ./cmd/audit
     binary: audit
     env: [CGO_ENABLED=0]
+    flags: [-trimpath]
     goos: [windows, linux, darwin]
     goarch: [amd64, arm64]
     ldflags:
@@ -19,6 +20,7 @@ builds:
     main: ./cmd/auditd
     binary: auditd
     env: [CGO_ENABLED=0]
+    flags: [-trimpath]
     goos: [windows, linux, darwin]
     goarch: [amd64, arm64]
     ldflags:
@@ -27,6 +29,7 @@ builds:
     main: ./mcp
     binary: agent-audit-mcp
     env: [CGO_ENABLED=0]
+    flags: [-trimpath]
     goos: [windows, linux, darwin]
     goarch: [amd64, arm64]
     ldflags:
