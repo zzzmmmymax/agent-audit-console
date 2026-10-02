@@ -6,12 +6,17 @@ Report date: 2026-10-02 (Asia/Shanghai)
 
 | Gate | Status |
 |---|---|
+| Current Directory | `D:\agent-audit-console` |
+| Git Top Level | `D:\agent-audit-console` |
+| Independent Repository | YES — local `.git` directory and expected history verified |
 | Current Branch | `master` |
 | Current Commit | `HEAD` (the commit containing this report; resolve with `git rev-parse HEAD`) |
-| Remote | **REMOTE NOT CONFIGURED** |
+| GitHub Username | `zzzmmmymax` (read from `gh api user`) |
+| GitHub Repository | `https://github.com/zzzmmmymax/agent-audit-console` (PRIVATE) |
+| Remote | `origin` → `https://github.com/zzzmmmymax/agent-audit-console.git` |
 | Initial Commit | PASS — `6f7ffa5` (`feat: initial Agent Audit Console v0.1.0 release candidate`) |
-| Push Status | NOT RUN — no `origin` or other remote is configured |
-| GitHub CI Status | NOT RUN — push could not occur without a configured remote |
+| Push Status | PENDING |
+| GitHub CI Status | PENDING |
 | Ubuntu Runner | NOT RUN |
 | Windows Runner | NOT RUN |
 | macOS Runner | NOT RUN |
@@ -35,10 +40,23 @@ Report date: 2026-10-02 (Asia/Shanghai)
 ## Git workspace audit
 
 The repository began Stage 5 on `master` with no commits, no remote, and all
-project files untracked. The review found ignored local build binaries under
-`bin/` and frontend dependencies under `web/node_modules/`; neither entered the
-commit. No audit databases, runtime snapshots, logs, coverage output, local
-configuration, certificates, private keys, or user data were staged.
+project files untracked. The initial commit and Stage 5 status commit were then
+created. The complete repository was moved to `D:\agent-audit-console`; its Git
+top level is that same directory, its local `.git` metadata is intact, and both
+expected commits remain in the history. It is not managed by a parent or shared
+repository.
+
+The review found ignored local build binaries under `bin/` and frontend
+dependencies under `web/node_modules/`; neither entered the commit. No audit
+databases, runtime snapshots, logs, coverage output, local configuration,
+certificates, private keys, or user data were staged.
+
+The previous remote issue root cause is **C: the project was already an
+independent repository but had never been configured with an origin**. Moving
+the directory improved project isolation but did not itself create a remote.
+GitHub CLI authentication and `gh api user` identified `zzzmmmymax`; a private,
+empty `zzzmmmymax/agent-audit-console` repository was created and configured as
+`origin` without generating remote README, license, or ignore files.
 
 `.gitignore` was expanded to exclude local environment files, SQLite variants
 and sidecars, runtime data/snapshot directories, logs, coverage, build output,
@@ -111,10 +129,9 @@ license.
 
 ## Known issues and blockers
 
-1. No Git remote is configured, so the release-candidate commit cannot be pushed
-   and GitHub Actions cannot run.
-2. Ubuntu, Windows, and macOS hosted runtime tests are therefore unverified.
-3. Linux GitHub race detection is unverified; local Windows race tests cannot
+1. The configured remote has not yet been pushed, so GitHub Actions has not run.
+2. Ubuntu, Windows, and macOS hosted runtime tests remain unverified.
+3. Linux GitHub race detection remains unverified; local Windows race tests cannot
    start without GCC.
 4. GoReleaser snapshot packaging and generated checksums await green hosted CI.
 5. The final license decision remains outstanding.
