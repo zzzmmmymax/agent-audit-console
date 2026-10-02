@@ -1,0 +1,48 @@
+version: 2
+project_name: agent-audit-console
+
+before:
+  hooks:
+    - npm --prefix web ci
+    - npm --prefix web run build
+
+builds:
+  - id: audit
+    main: ./cmd/audit
+    binary: audit
+    env: [CGO_ENABLED=0]
+    goos: [windows, linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/agent-audit-console/agent-audit-console/internal/buildinfo.Version={{.Version}} -X github.com/agent-audit-console/agent-audit-console/internal/buildinfo.Commit={{.Commit}} -X github.com/agent-audit-console/agent-audit-console/internal/buildinfo.BuildTime={{.Date}}
+  - id: auditd
+    main: ./cmd/auditd
+    binary: auditd
+    env: [CGO_ENABLED=0]
+    goos: [windows, linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/agent-audit-console/agent-audit-console/internal/buildinfo.Version={{.Version}} -X github.com/agent-audit-console/agent-audit-console/internal/buildinfo.Commit={{.Commit}} -X github.com/agent-audit-console/agent-audit-console/internal/buildinfo.BuildTime={{.Date}}
+  - id: agent-audit-mcp
+    main: ./mcp
+    binary: agent-audit-mcp
+    env: [CGO_ENABLED=0]
+    goos: [windows, linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/agent-audit-console/agent-audit-console/internal/buildinfo.Version={{.Version}} -X github.com/agent-audit-console/agent-audit-console/internal/buildinfo.Commit={{.Commit}} -X github.com/agent-audit-console/agent-audit-console/internal/buildinfo.BuildTime={{.Date}}
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  disable: true

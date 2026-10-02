@@ -1,0 +1,23 @@
+import React, {useEffect, useState} from 'react';
+import {createRoot} from 'react-dom/client';
+import {Diff, Hunk, parseDiff} from 'react-diff-view';
+import 'react-diff-view/style/index.css';
+import './style.css';
+import {integrityLabel,rollbackLabel} from './status';
+
+type Run={run_id:string;agent_type:string;agent_id:string;status:string;workspace_path:string;started_at:string;ended_at?:string};
+type Event={event_id:string;sequence:number;kind:string;intent:string;timestamp:string;evidence:{data?:Record<string,unknown>};risk:{level:string};policy_decision:{status:string};reversibility?:{status:string}};
+type Detail={run:Run;events:Event[];integrity_status?:'verified'|'broken'|'unknown';rollback_status?:'available'|'partial'|'unavailable'|'unknown';has_more:boolean;next_after:number};
+
+const pageSize=200;
+function FileDiff({text}:{text:string}){if(!text)return <p className="muted">No textual diff.</p>;try{return <>{parseDiff(text).map((file,index)=><Diff key={index} viewType="split" diffType={file.type} hunks={file.hunks}>{hunks=>hunks.map(hunk=><Hunk key={hunk.content} hunk={hunk}/>)}</Diff>)}</>}catch{return <pre>{text}</pre>}}
+function EventCard({event}:{event:Event}){const evidence=event.evidence?.data??{};const diff=typeof evidence.diff==='string'?evidence.diff:'';const risk=event.risk?.level||'unknown';return <article className={`event kind-${event.kind}`}><header><span className="sequence">#{event.sequence}</span><strong>{event.kind}</strong><span className={`badge risk-${risk}`}>{risk}</span><span className={`badge decision-${event.policy_decision.status}`}>{event.policy_decision.status}</span><time>{new Date(event.timestamp).toLocaleString()}</time></header><p>{event.intent}</p>{event.kind==='command'&&<div className="command"><code>{Array.isArray(evidence.command)?evidence.command.join(' '):''}</code><span className={evidence.exit_code===0?'pass':'fail'}>exit {String(evidence.exit_code)}</span>{Boolean(evidence.stdout)&&<pre>{String(evidence.stdout)}</pre>}{Boolean(evidence.stderr)&&<pre className="stderr">{String(evidence.stderr)}</pre>}</div>}{event.kind==='file_change'&&<><p><b>{String(evidence.change_type)}</b> {String(evidence.path)}</p><FileDiff text={diff}/></>}</article>}
+
+function App(){
+  const[runs,setRuns]=useState<Run[]>([]);const[selected,setSelected]=useState<string>();const[detail,setDetail]=useState<Detail>();const[pageStart,setPageStart]=useState(0);const[error,setError]=useState('');
+  useEffect(()=>{fetch('/api/runs').then(r=>{if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.json()}).then(setRuns).catch(e=>setError(String(e)))},[]);
+  const loadPage=(runID:string,after:number)=>{setError('');fetch(`/api/runs/${encodeURIComponent(runID)}?limit=${pageSize}&after=${after}`).then(r=>{if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.json()}).then((value:Detail)=>{setDetail(value);setPageStart(after)}).catch(e=>setError(String(e)))};
+  useEffect(()=>{if(selected)loadPage(selected,0)},[selected]);
+  return <main><aside><div className="brand"><span>LOCAL AUDIT</span><h1>Agent Audit Console</h1></div><h2>Runs</h2>{runs.map(run=><button className={selected===run.run_id?'selected':''} key={run.run_id} onClick={()=>setSelected(run.run_id)}><span>{run.status}</span><b>{run.run_id.slice(0,28)}</b><small>{new Date(run.started_at).toLocaleString()}</small></button>)}</aside><section className="content">{error&&<div className="error"><b>Unable to load audit data</b><p>{error}</p></div>}{detail?<><div className="run-head"><div><p className="eyebrow">{detail.run.agent_type} · {detail.run.agent_id}</p><h2>{detail.run.run_id}</h2><p>{detail.run.workspace_path}</p></div><div><span className={`integrity ${detail.integrity_status||'unknown'}`}>Integrity: {integrityLabel(detail.integrity_status)}</span><span className={`integrity rollback-${detail.rollback_status||'unknown'}`}>Rollback: {rollbackLabel(detail.rollback_status)}</span></div></div><div className="timeline">{detail.events.map(event=><EventCard key={event.event_id} event={event}/>)}</div><nav className="pager"><button disabled={pageStart===0} onClick={()=>loadPage(detail.run.run_id,Math.max(0,pageStart-pageSize))}>Previous {pageSize}</button><span>Events after #{pageStart}</span><button disabled={!detail.has_more} onClick={()=>loadPage(detail.run.run_id,detail.next_after)}>Next {pageSize}</button></nav></>:<div className="empty"><h2>Select an audit run</h2><p>Inspect commands, file changes, diffs, outputs, rollback availability, and integrity.</p></div>}</section></main>
+}
+createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);

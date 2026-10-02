@@ -1,0 +1,52 @@
+# Go build output
+/audit
+/audit.exe
+/auditd
+/auditd.exe
+/bin/
+*.test
+*.out
+
+# Local-first runtime data
+/.agent-audit/
+/data/
+/snapshots/
+*.db
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3-shm
+*.sqlite3-wal
+*.log
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+/agent-audit.local.yaml
+/config.local.yaml
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# Frontend dependencies and output (Stage 1+)
+node_modules/
+/dist/
+/web/dist/
+/coverage/
+coverage/
+*.tsbuildinfo
+/web/vite.config.js
+/web/vite.config.d.ts
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
