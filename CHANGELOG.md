@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented here.
 
-## v0.1.0 - Unreleased
+## v0.1.0 - 2026-10-03
 
 ### Added
 
@@ -26,4 +26,7 @@ All notable changes to this project will be documented here.
 - External side effects are not generally reversible.
 - Raw snapshots can contain secrets.
 - Token-protected browser login is not included in v0.1.0.
-- The final project license remains an owner decision.
+
+### License
+
+- Released under the Apache License 2.0.

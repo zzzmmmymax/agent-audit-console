@@ -1,5 +1,8 @@
 # Stage 4 completion report
 
+> Historical status note: the license blocker recorded in this Stage 4 report
+> was resolved when the project owner selected Apache-2.0 before v0.1.0.
+
 Report date: 2026-10-02 (Asia/Shanghai)
 
 ## 1. Completion status

@@ -1,5 +1,8 @@
 # v0.1.0 release audit
 
+> Historical status note: RA-025 was resolved when the project owner selected
+> Apache-2.0 before the v0.1.0 release.
+
 Audit date: 2026-10-02 (Asia/Shanghai)
 
 This document records the repository state observed before Stage 4 changes.

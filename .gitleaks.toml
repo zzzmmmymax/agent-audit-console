@@ -1,0 +1,9 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic AWS access-key marker used by the redaction unit test"
+condition = "AND"
+regexTarget = "match"
+regexes = ['''AKIAABCDEFGHIJKLMNOP''']
+paths = ['''^internal/redact/redact_test\.go$''']

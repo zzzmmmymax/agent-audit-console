@@ -4,6 +4,8 @@ Agent Audit Console v0.1.0 is a local-first audit recorder for controlled AI
 coding-agent activity. It is intended for individual developers and local
 evaluation, not as an operating-system security product.
 
+The release is licensed under the Apache License 2.0.
+
 ## Supported
 
 - Local-first SQLite/WAL audit storage.

@@ -34,9 +34,9 @@ Report date: 2026-10-03 (Asia/Shanghai)
 | Artifact Smoke Test | PASS — extracted Windows amd64 archive; version, doctor, daemon, health, readiness, and embedded Web verified |
 | Secret Scan | PASS — only deliberate fake credentials in redaction tests matched; artifacts contain no developer project/user path |
 | Security Gate | PASS — repository, history, CI, artifacts, and local smoke test verified |
-| License Status | TO BE DETERMINED before public release |
+| License Status | At Stage 5 completion: TO BE DETERMINED; finalized as Apache-2.0 before v0.1.0 |
 | Stage 5 | **COMPLETE** |
-| Release Status | **RELEASE READY — WAITING FOR LICENSE DECISION** |
+| Release Status | **At Stage 5 completion: RELEASE READY — WAITING FOR LICENSE DECISION** |
 
 ## Git workspace audit
 
@@ -123,7 +123,7 @@ notes draft is in `docs/release-notes-v0.1.0.md`.
 GoReleaser v2.18.2 validated the configuration and completed a snapshot from
 commit `0935d10`. It produced Windows, Linux, and Darwin archives on amd64 and
 arm64. Windows uses ZIP; Linux and macOS use tar.gz. Every archive contains
-`audit`, `auditd`, `agent-audit-mcp`, README, and the current license-status
+`audit`, `auditd`, `agent-audit-mcp`, README, and the then-current license-status
 notice. All six archive hashes match `checksums.txt`.
 
 The first dry run exposed the local Go toolchain path in binaries. This was
@@ -140,28 +140,25 @@ published.
 
 ## License
 
-No license was selected on the owner's behalf. `LICENSE` is a license-pending
-notice and README does not describe the project as MIT, Apache, GPL, AGPL, BSL,
-SSPL, proprietary, or open source. Private development and CI validation can
-continue, but public release remains blocked until the owner chooses the actual
-license.
+At Stage 5 completion, no license had been selected on the owner's behalf and
+formal release was therefore blocked. The project owner subsequently selected
+Apache License 2.0 for v0.1.0 during Stage 6; the repository now contains the
+standard Apache-2.0 license text.
 
 ## Known issues and blockers
 
-1. The final license decision remains outstanding and blocks formal public
-   release.
-2. GitHub reports that the selected stable major versions of the official
+1. GitHub reports that the selected stable major versions of the official
    checkout/setup actions target deprecated Node.js 20 and are temporarily
    forced onto Node.js 24 by the runner. This warning did not fail any job and
    should be addressed when the official actions publish/adopt newer majors.
-3. The configured npm mirror does not implement the vulnerability-audit API, so
+2. The configured npm mirror does not implement the vulnerability-audit API, so
    that optional query remains unverified; lockfile installation and tests pass.
 
 ## Completion decision
 
 **Stage 5: COMPLETE**
 
-**Release State: RELEASE READY — WAITING FOR LICENSE DECISION**
+**Release State at Stage 5 completion: RELEASE READY — WAITING FOR LICENSE DECISION**
 
-All technical Stage 5 gates are satisfied. Do not create a tag or GitHub Release
-until the separate formal release stage and the owner's license decision.
+All technical Stage 5 gates were satisfied. The license was subsequently
+finalized as Apache-2.0 before the separate Stage 6 release process.

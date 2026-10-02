@@ -218,8 +218,7 @@ development.
   may contain secrets; protect the data directory.
 - A native Codex Sidebar is not included without a stable official extension
   API.
-- The repository currently carries a license-pending notice, not an open-source
-  license grant.
+- The project is licensed under the Apache License 2.0.
 
 ## Build
 
@@ -256,9 +255,13 @@ modifies the current checkout.
 CI is configured for Windows, Ubuntu, and macOS. Release packaging is described
 by `.goreleaser.yaml` and produces Windows ZIP files, Linux/macOS tarballs, and
 SHA-256 checksums for `audit`, `auditd`, and `agent-audit-mcp`. Archives include
-the README and the current license-status notice. No tag, release, or package is
-created by this repository state. The final license must be selected by the
-project owner before a public release.
+the README and Apache License 2.0 text.
+
+## License
+
+Agent Audit Console is licensed under the Apache License 2.0.
+
+See [LICENSE](LICENSE) for details.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and
 [CHANGELOG.md](CHANGELOG.md).

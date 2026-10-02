@@ -1,6 +1,7 @@
 # Agent Audit Console v0.1.0
 
-Release notes draft. This version has not been tagged or published.
+Initial stable release of the local-first Agent audit recorder and control
+console.
 
 ## Highlights
 
@@ -53,4 +54,8 @@ Release packaging targets:
 - Token-protected browser login and automatic retention deletion are deferred.
 - Exact snapshots may contain sensitive source content and must be protected by
   local filesystem permissions.
-- The final project license remains to be selected before public release.
+
+## License
+
+Agent Audit Console is licensed under the Apache License 2.0. See `LICENSE` for
+details.

@@ -29,5 +29,4 @@ fixtures.
 - Keep pull requests focused. Do not combine large product features with
   release-hardening fixes.
 
-The repository currently has a license-pending notice. Contributions do not
-change that status.
+Contributions are accepted under the project's Apache License 2.0.
