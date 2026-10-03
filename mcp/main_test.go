@@ -48,7 +48,7 @@ func TestMCPStartRunAndSummary(t *testing.T) {
 			count++
 		}
 	}
-	if count != 21 {
+	if count != 22 {
 		t.Fatalf("tools=%d", count)
 	}
 }
@@ -109,6 +109,11 @@ func TestMCPIntegrationDemo(t *testing.T) {
 	}
 	call("health", map[string]any{})
 	call("capabilities", map[string]any{})
+	simulated := call("simulate_policy", map[string]any{"kind": "command", "intent": "push", "command": []string{"git", "push", "origin", "main"}})
+	simulatedJSON, _ := json.Marshal(simulated.StructuredContent)
+	if !strings.Contains(string(simulatedJSON), "require_approval") || !strings.Contains(string(simulatedJSON), "policy_fingerprint") {
+		t.Fatalf("simulate_policy=%s", simulatedJSON)
+	}
 	started := call("start_run", map[string]any{"agent_type": "custom", "agent_id": "demo", "session_id": "demo-session", "workspace_path": t.TempDir()})
 	raw, _ := json.Marshal(started.StructuredContent)
 	var startedValue struct {

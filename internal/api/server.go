@@ -15,6 +15,7 @@ import (
 	"github.com/agent-audit-console/agent-audit-console/internal/auth"
 	"github.com/agent-audit-console/agent-audit-console/internal/capture"
 	"github.com/agent-audit-console/agent-audit-console/internal/events"
+	"github.com/agent-audit-console/agent-audit-console/internal/policy"
 	"github.com/agent-audit-console/agent-audit-console/internal/redact"
 	"github.com/go-chi/chi/v5"
 )
@@ -24,6 +25,7 @@ var staticFiles embed.FS
 
 type Server struct {
 	store     *events.SQLiteStore
+	policy    *policy.Engine
 	readiness func(context.Context) error
 	router    chi.Router
 }
@@ -31,11 +33,19 @@ type Server struct {
 func New(store *events.SQLiteStore) *Server { return NewWithAuth(store, nil) }
 
 func NewWithAuth(store *events.SQLiteStore, access *auth.Manager, readiness ...func(context.Context) error) *Server {
+	return newServer(store, nil, access, readiness...)
+}
+
+func NewWithPolicy(store *events.SQLiteStore, engine *policy.Engine, access *auth.Manager, readiness ...func(context.Context) error) *Server {
+	return newServer(store, engine, access, readiness...)
+}
+
+func newServer(store *events.SQLiteStore, engine *policy.Engine, access *auth.Manager, readiness ...func(context.Context) error) *Server {
 	check := store.Ready
 	if len(readiness) > 0 && readiness[0] != nil {
 		check = readiness[0]
 	}
-	s := &Server{store: store, readiness: check}
+	s := &Server{store: store, policy: engine, readiness: check}
 	r := chi.NewRouter()
 	r.Use(securityHeaders)
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -58,6 +68,10 @@ func NewWithAuth(store *events.SQLiteStore, access *auth.Manager, readiness ...f
 			r.Post("/runs/{runID}/verify", s.verifyRun)
 			r.Get("/runs/{runID}/rollback-preview", s.rollbackPreview)
 			r.Get("/events/{eventID}", s.event)
+			r.Get("/policy", s.policyInspection)
+			r.Post("/policy/simulate", s.policySimulate)
+			r.Post("/policy/validate", s.policyValidate)
+			r.Get("/runs/{runID}/actions/{actionID}/policy", s.policyExplain)
 		})
 		r.With(authorize(access, auth.RoleOperator)).Post("/runs/{runID}/rollback-requests", s.requestRollback)
 	})
@@ -337,6 +351,103 @@ func (s *Server) requestRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"rollback_id": record.RollbackID, "status": record.Status})
+}
+
+func (s *Server) policyInspection(w http.ResponseWriter, _ *http.Request) {
+	if s.policy == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "policy engine unavailable"})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.policy.Inspect())
+}
+
+type simulationInput struct {
+	Action      string         `json:"action"`
+	Kind        events.Kind    `json:"kind,omitempty"`
+	Command     []string       `json:"command,omitempty"`
+	Path        string         `json:"path,omitempty"`
+	Agent       string         `json:"agent,omitempty"`
+	Workspace   string         `json:"workspace,omitempty"`
+	Target      string         `json:"target,omitempty"`
+	Environment string         `json:"environment,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
+}
+
+func (s *Server) policySimulate(w http.ResponseWriter, r *http.Request) {
+	if s.policy == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "policy engine unavailable"})
+		return
+	}
+	var input simulationInput
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid simulation request"})
+		return
+	}
+	if input.Action == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action is required"})
+		return
+	}
+	if input.Kind == "" {
+		input.Kind = events.KindCommand
+	}
+	evidence, _ := json.Marshal(map[string]any{"command": input.Command, "path": input.Path, "agent": input.Agent, "workspace": input.Workspace, "target": input.Target, "environment": input.Environment, "parameters": input.Parameters})
+	result, err := s.policy.Simulate(r.Context(), events.Event{Kind: input.Kind, Intent: boundedText(input.Action, 4096), Evidence: events.Evidence{Data: evidence}, Reversibility: events.Reversibility{Status: events.NotApplicable}})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) policyValidate(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Document string `json:"document"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, policy.MaxPolicyBytes+4096))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid validation request"})
+		return
+	}
+	writeJSON(w, http.StatusOK, policy.ValidateDocument([]byte(input.Document)))
+}
+
+func (s *Server) policyExplain(w http.ResponseWriter, r *http.Request) {
+	if s.policy == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "policy engine unavailable"})
+		return
+	}
+	runID, actionID := chi.URLParam(r, "runID"), chi.URLParam(r, "actionID")
+	items, err := s.store.Query(r.Context(), events.Query{RunID: runID, Limit: 1000})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	var recorded *events.Event
+	for index := range items {
+		if items[index].ActionID == actionID {
+			item := items[index]
+			recorded = &item
+			break
+		}
+	}
+	if recorded == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "action not found"})
+		return
+	}
+	current, err := s.policy.Simulate(r.Context(), *recorded)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	fingerprint := recorded.PolicyDecision.PolicyFingerprint
+	writeJSON(w, http.StatusOK, map[string]any{
+		"recorded": map[string]any{"decision": recorded.PolicyDecision, "risk": recorded.Risk, "policy_fingerprint": fingerprint},
+		"current":  current, "re_evaluated": true,
+		"recorded_available": fingerprint != "", "policy_changed": fingerprint != "" && fingerprint != current.PolicyFingerprint,
+	})
 }
 
 func parseUint(value string, fallback uint64) uint64 {

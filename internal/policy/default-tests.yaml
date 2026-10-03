@@ -1,0 +1,22 @@
+version: 1
+cases:
+  - name: git push requires approval
+    action: git_push
+    command: [git, push, origin, main]
+    expect: {risk: high, decision: require_approval}
+  - name: file deletion requires approval
+    action: delete_file
+    command: [rm, important.txt]
+    expect: {risk: high, decision: require_approval}
+  - name: overwrite warns by risk only
+    action: overwrite_file
+    command: [Set-Content, output.txt]
+    expect: {risk: medium, decision: allow}
+  - name: network is medium risk
+    action: network_request
+    command: [curl, https://example.com]
+    expect: {risk: medium, decision: allow}
+  - name: ordinary test is allowed
+    action: run_tests
+    command: [go, test, ./...]
+    expect: {risk: low, decision: allow}

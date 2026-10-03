@@ -55,9 +55,18 @@ const (
 // PolicyDecision records the result of policy evaluation. RuleID remains
 // optional until the YAML policy engine is introduced in Stage 2.
 type PolicyDecision struct {
-	Status string `json:"status"`
-	RuleID string `json:"rule_id,omitempty"`
-	Reason string `json:"reason,omitempty"`
+	Status              string   `json:"status"`
+	RuleID              string   `json:"rule_id,omitempty"`
+	Reason              string   `json:"reason,omitempty"`
+	Decision            string   `json:"decision,omitempty"`
+	PolicySource        string   `json:"policy_source,omitempty"`
+	PolicyFile          string   `json:"policy_file,omitempty"`
+	RuleName            string   `json:"rule_name,omitempty"`
+	RulePriority        int      `json:"rule_priority,omitempty"`
+	MatchedRules        []string `json:"matched_rules,omitempty"`
+	PolicyFingerprint   string   `json:"policy_fingerprint,omitempty"`
+	PolicySchemaVersion int      `json:"policy_schema_version,omitempty"`
+	RequiresApproval    bool     `json:"requires_approval,omitempty"`
 }
 
 const (

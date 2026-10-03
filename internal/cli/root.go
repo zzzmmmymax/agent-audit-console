@@ -20,6 +20,7 @@ import (
 	runtimeconfig "github.com/agent-audit-console/agent-audit-console/internal/config"
 	"github.com/agent-audit-console/agent-audit-console/internal/events"
 	"github.com/agent-audit-console/agent-audit-console/internal/integrations"
+	"github.com/agent-audit-console/agent-audit-console/internal/policy"
 	"github.com/agent-audit-console/agent-audit-console/internal/syncclient"
 	"github.com/spf13/cobra"
 )
@@ -52,7 +53,7 @@ func New(stdout, stderr io.Writer) *cobra.Command {
 		return audit.OpenWithConfig(resolved)
 	}
 
-	root.AddCommand(versionCommand(stdout), runCommand(stdout, stderr, openService), logCommand(stdout, openService), showCommand(stdout, openService), restoreCommand(stdout, openService), exportCommand(stdout, openService), accessTokenCommand(stdout, loadConfig), syncCommand(stdout, loadConfig), verifyCommand(stdout, openService), setupCommand(stdout, loadConfig), doctorCommand(stdout, loadConfig, openService))
+	root.AddCommand(versionCommand(stdout), runCommand(stdout, stderr, openService), logCommand(stdout, openService), showCommand(stdout, openService), restoreCommand(stdout, openService), exportCommand(stdout, openService), accessTokenCommand(stdout, loadConfig), syncCommand(stdout, loadConfig), verifyCommand(stdout, openService), setupCommand(stdout, loadConfig), doctorCommand(stdout, loadConfig, openService), policyCommand(stdout, loadConfig, openService))
 	return root
 }
 
@@ -326,6 +327,184 @@ func verifyCommand(stdout io.Writer, open serviceOpener) *cobra.Command {
 	}}
 }
 
+func policyCommand(stdout io.Writer, load configLoader, open serviceOpener) *cobra.Command {
+	root := &cobra.Command{Use: "policy", Short: "Validate, simulate, explain, and test policy"}
+	root.AddCommand(policyValidateCommand(stdout, load), policySimulateCommand(stdout, open), policyExplainCommand(stdout, open), policyTestCommand(stdout, load, open))
+	return root
+}
+
+func policyValidateCommand(stdout io.Writer, load configLoader) *cobra.Command {
+	var path string
+	var jsonOutput bool
+	command := &cobra.Command{Use: "validate", Short: "Validate a policy YAML document", Args: cobra.NoArgs, RunE: func(*cobra.Command, []string) error {
+		resolved, err := load()
+		if err != nil {
+			return err
+		}
+		if path == "" {
+			path = resolved.PolicyFile
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		report := policy.ValidateDocument(data)
+		if jsonOutput {
+			_ = json.NewEncoder(stdout).Encode(report)
+		} else {
+			for _, item := range report.Errors {
+				fmt.Fprintf(stdout, "ERROR [%s] %s\n", item.Code, item.Message)
+			}
+			for _, item := range report.Warnings {
+				fmt.Fprintf(stdout, "WARNING [%s] %s\n", item.Code, item.Message)
+			}
+			if report.Valid {
+				fmt.Fprintf(stdout, "PASS — %d rules; fingerprint %s\n", report.RuleCount, report.Fingerprint)
+			}
+		}
+		if !report.Valid {
+			return CommandExitError{Code: 2, Message: "policy validation failed"}
+		}
+		return nil
+	}}
+	command.Flags().StringVar(&path, "file", "", "policy YAML path")
+	command.Flags().BoolVar(&jsonOutput, "json", false, "emit stable JSON")
+	return command
+}
+
+func policySimulateCommand(stdout io.Writer, open serviceOpener) *cobra.Command {
+	var action, kind, path, agent, workspace, target, environment string
+	var commandParts []string
+	var jsonOutput bool
+	command := &cobra.Command{Use: "simulate", Short: "Preview a policy decision without side effects", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		service, err := open()
+		if err != nil {
+			return err
+		}
+		defer service.Close()
+		if action == "" {
+			return errors.New("--action is required")
+		}
+		evidence, _ := json.Marshal(map[string]any{"command": commandParts, "path": path, "agent": agent, "workspace": workspace, "target": target, "environment": environment})
+		result, err := service.Policy.Simulate(cmd.Context(), events.Event{Kind: events.Kind(kind), Intent: action, Evidence: events.Evidence{Data: evidence}, Reversibility: events.Reversibility{Status: events.NotApplicable}})
+		if err != nil {
+			return err
+		}
+		if jsonOutput {
+			return json.NewEncoder(stdout).Encode(result)
+		}
+		fmt.Fprintf(stdout, "Action: %s\nRisk: %s\nDecision: %s\nEffective rule: %s\nReason: %s\nMatched rules:\n", action, strings.ToUpper(result.RiskLevel), strings.ToUpper(result.Decision), result.RuleID, result.Reason)
+		for _, match := range result.MatchedRules {
+			fmt.Fprintf(stdout, "- %s/%s\n", match.Source, match.RuleID)
+		}
+		return nil
+	}}
+	command.Flags().StringVar(&action, "action", "", "hypothetical action intent")
+	command.Flags().StringVar(&kind, "kind", string(events.KindCommand), "event kind")
+	command.Flags().StringSliceVar(&commandParts, "command", nil, "command and arguments")
+	command.Flags().StringVar(&path, "path", "", "target path")
+	command.Flags().StringVar(&agent, "agent", "", "agent identity")
+	command.Flags().StringVar(&workspace, "workspace", "", "workspace context")
+	command.Flags().StringVar(&target, "target", "", "target context")
+	command.Flags().StringVar(&environment, "environment", "", "environment context")
+	command.Flags().BoolVar(&jsonOutput, "json", false, "emit stable JSON")
+	return command
+}
+
+func policyExplainCommand(stdout io.Writer, open serviceOpener) *cobra.Command {
+	var jsonOutput bool
+	command := &cobra.Command{Use: "explain RUN_ID ACTION_ID", Short: "Compare a recorded decision with current policy", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		service, err := open()
+		if err != nil {
+			return err
+		}
+		defer service.Close()
+		items, err := service.Store.Query(cmd.Context(), events.Query{RunID: args[0], Limit: 1000})
+		if err != nil {
+			return err
+		}
+		var recorded *events.Event
+		for index := range items {
+			if items[index].ActionID == args[1] {
+				item := items[index]
+				recorded = &item
+				break
+			}
+		}
+		if recorded == nil {
+			return fmt.Errorf("action %q was not found", args[1])
+		}
+		current, err := service.Policy.Simulate(cmd.Context(), *recorded)
+		if err != nil {
+			return err
+		}
+		value := map[string]any{"recorded": map[string]any{"decision": recorded.PolicyDecision, "risk": recorded.Risk, "policy_fingerprint": unavailable(recorded.PolicyDecision.PolicyFingerprint)}, "current": current, "re_evaluated": true, "policy_changed": recorded.PolicyDecision.PolicyFingerprint != "" && recorded.PolicyDecision.PolicyFingerprint != current.PolicyFingerprint}
+		if jsonOutput {
+			return json.NewEncoder(stdout).Encode(value)
+		}
+		fmt.Fprintf(stdout, "RECORDED DECISION: %s (%s)\nRECORDED POLICY: %s\nCURRENT SIMULATION: %s (%s)\nRE-EVALUATED: true\n", recorded.PolicyDecision.Status, recorded.Risk.Level, unavailable(recorded.PolicyDecision.PolicyFingerprint), current.Decision, current.RiskLevel)
+		return nil
+	}}
+	command.Flags().BoolVar(&jsonOutput, "json", false, "emit stable JSON")
+	return command
+}
+
+func unavailable(value string) string {
+	if value == "" {
+		return "Unavailable"
+	}
+	return value
+}
+
+func policyTestCommand(stdout io.Writer, load configLoader, open serviceOpener) *cobra.Command {
+	var path string
+	var jsonOutput bool
+	command := &cobra.Command{Use: "test", Short: "Run policy regression cases", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		resolved, err := load()
+		if err != nil {
+			return err
+		}
+		if path == "" {
+			path = filepath.Join(filepath.Dir(resolved.PolicyFile), "policy.tests.yaml")
+		}
+		data, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			data, err = policy.DefaultTests, nil
+		}
+		if err != nil {
+			return err
+		}
+		service, err := open()
+		if err != nil {
+			return err
+		}
+		defer service.Close()
+		report, err := policy.RunTests(cmd.Context(), service.Policy, data)
+		if err != nil {
+			return err
+		}
+		if jsonOutput {
+			_ = json.NewEncoder(stdout).Encode(report)
+		} else {
+			for _, result := range report.Results {
+				status := "PASS"
+				if !result.Passed {
+					status = "FAIL"
+				}
+				fmt.Fprintf(stdout, "%s %s — expected %s/%s, actual %s/%s\n", status, result.Name, result.Expected.Risk, result.Expected.Decision, result.Actual.Risk, result.Actual.Decision)
+			}
+			fmt.Fprintf(stdout, "%d passed, %d failed\n", report.Passed, report.Failed)
+		}
+		if report.Failed > 0 {
+			return CommandExitError{Code: 3, Message: "policy tests failed"}
+		}
+		return nil
+	}}
+	command.Flags().StringVar(&path, "tests", "", "policy tests YAML path")
+	command.Flags().BoolVar(&jsonOutput, "json", false, "emit stable JSON")
+	return command
+}
+
 func doctorCommand(stdout io.Writer, load configLoader, open serviceOpener) *cobra.Command {
 	return &cobra.Command{Use: "doctor", Short: "Check local configuration and runtime dependencies without printing secrets", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		resolved, err := load()
@@ -348,7 +527,7 @@ func doctorCommand(stdout io.Writer, load configLoader, open serviceOpener) *cob
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "PASS data directory: writable\nPASS database: ready (schema %d)\nPASS snapshot directory: writable\nPASS policy: loaded\n", version)
+		fmt.Fprintf(stdout, "PASS data directory: writable\nPASS database: ready (schema %d)\nPASS snapshot directory: writable\n%s\n", version, service.Policy.Health())
 		if resolved.RetentionDays == 0 {
 			fmt.Fprintln(stdout, "PASS retention: keep forever")
 		} else {

@@ -1,0 +1,23 @@
+version: 1
+default: {risk: low, decision: allow}
+rules:
+  - id: protected-push
+    name: Protected branch push
+    description: Publishing to the protected branch requires review.
+    command_regex: '(?i)git\s+push.*\bmain\b'
+    risk: high
+    decision: require_approval
+    priority: 100
+  - id: production-delete
+    name: Production deletion
+    description: Destructive production operations are denied.
+    command_regex: '(?i)(rm|remove-item).*prod'
+    risk: high
+    decision: deny
+    priority: 200
+  - id: network-preview
+    description: Network requests are visible before execution.
+    command_regex: '(?i)(curl|wget)'
+    risk: medium
+    decision: warn
+    priority: 10

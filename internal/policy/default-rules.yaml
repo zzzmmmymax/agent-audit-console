@@ -1,25 +1,25 @@
 version: 1
 default:
   risk: low
-  decision: allowed
+  decision: allow
 rules:
   - id: git-push
     description: Publishing commits changes remote state.
     command_regex: '(?i)(^|\s)git(?:\.exe)?\s+push(?:\s|$)'
     risk: high
-    decision: pending
+    decision: require_approval
   - id: delete-file
     description: File deletion can destroy uncommitted local content.
     command_regex: '(?i)(^|\s)(rm|del|erase|remove-item)(?:\.exe)?(?:\s|$)'
     risk: high
-    decision: pending
+    decision: require_approval
   - id: overwrite-file
     description: Explicit overwrite operations can replace local content.
     command_regex: '(?i)(>|set-content|out-file|copy-item|copy\s+/y)'
     risk: medium
-    decision: allowed
+    decision: allow
   - id: network-request
     description: Network tools can transmit data or trigger external effects.
     command_regex: '(?i)(^|\s)(curl|wget|invoke-webrequest|invoke-restmethod)(?:\.exe)?(?:\s|$)'
     risk: medium
-    decision: allowed
+    decision: allow

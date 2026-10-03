@@ -19,6 +19,7 @@ import (
 	"github.com/agent-audit-console/agent-audit-console/internal/buildinfo"
 	runtimeconfig "github.com/agent-audit-console/agent-audit-console/internal/config"
 	"github.com/agent-audit-console/agent-audit-console/internal/events"
+	"github.com/agent-audit-console/agent-audit-console/internal/policy"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -146,16 +147,26 @@ type summaryOutput struct {
 	Truncated bool           `json:"truncated,omitempty"`
 }
 type policyInput struct {
-	Kind    events.Kind `json:"kind"`
-	Intent  string      `json:"intent"`
-	Command []string    `json:"command,omitempty"`
+	Kind        events.Kind `json:"kind"`
+	Intent      string      `json:"intent"`
+	Command     []string    `json:"command,omitempty"`
+	Path        string      `json:"path,omitempty"`
+	Target      string      `json:"target,omitempty"`
+	Agent       string      `json:"agent,omitempty"`
+	Workspace   string      `json:"workspace,omitempty"`
+	Environment string      `json:"environment,omitempty"`
 }
 type policyOutput struct {
-	Risk        string `json:"risk"`
-	Decision    string `json:"decision"`
-	MatchedRule string `json:"matched_rule,omitempty"`
-	Reason      string `json:"reason,omitempty"`
-	Source      string `json:"source,omitempty"`
+	Risk              string             `json:"risk"`
+	Decision          string             `json:"decision"`
+	CanonicalDecision string             `json:"canonical_decision"`
+	MatchedRule       string             `json:"matched_rule,omitempty"`
+	Reason            string             `json:"reason,omitempty"`
+	Source            string             `json:"source,omitempty"`
+	MatchedRules      []policy.RuleMatch `json:"matched_rules"`
+	Trace             []policy.TraceStep `json:"trace"`
+	Fingerprint       string             `json:"policy_fingerprint"`
+	RequiresApproval  bool               `json:"requires_approval"`
 }
 type approvalInput struct {
 	actionInput
@@ -232,7 +243,7 @@ func main() {
 
 func newServer(service *audit.Service) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "agent-audit-console", Version: buildinfo.Version}, nil)
-	tools := []string{"start_run", "get_run", "get_run_summary", "finish_run", "plan_action", "record_action", "complete_action", "fail_action", "list_runs", "list_events", "get_event", "get_file_diff", "evaluate_action", "explain_policy", "request_approval", "get_approval_status", "preview_rollback", "request_rollback", "get_rollback_status", "health", "capabilities"}
+	tools := []string{"start_run", "get_run", "get_run_summary", "finish_run", "plan_action", "record_action", "complete_action", "fail_action", "list_runs", "list_events", "get_event", "get_file_diff", "evaluate_action", "simulate_policy", "explain_policy", "request_approval", "get_approval_status", "preview_rollback", "request_rollback", "get_rollback_status", "health", "capabilities"}
 	mcp.AddTool(server, &mcp.Tool{Name: "health", Description: "Check local MCP dependencies without exposing secrets"}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, map[string]any, error) {
 		status := "ok"
 		database, snapshot, policy := "ok", "ok", "ok"
@@ -251,7 +262,7 @@ func newServer(service *audit.Service) *mcp.Server {
 		return nil, map[string]any{"status": status, "version": buildinfo.Version, "database": database, "snapshot_store": snapshot, "policy": policy, "server_time": time.Now().UTC()}, nil
 	})
 	mcp.AddTool(server, &mcp.Tool{Name: "capabilities", Description: "Discover MCP, adapter, event, policy, approval and rollback capabilities"}, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, map[string]any, error) {
-		return nil, map[string]any{"server_version": buildinfo.Version, "protocol_version": protocolVersion, "audit_capabilities_version": "2", "tools": tools, "adapters": service.Adapters.List(), "event_kinds": []events.Kind{events.KindCommand, events.KindFileChange, events.KindGit, events.KindMCPCall, events.KindApproval, events.KindRollback}, "policy_decisions": []string{events.PolicyAllowed, events.PolicyPending, events.PolicyApproved, events.PolicyRejected}, "error_codes": []errorCode{invalidArgument, notFound, conflict, policyDenied, approvalRequired, unauthorized, integrityError, internalError}, "approval_support": true, "rollback_support": true}, nil
+		return nil, map[string]any{"server_version": buildinfo.Version, "protocol_version": protocolVersion, "audit_capabilities_version": "2", "tools": tools, "adapters": service.Adapters.List(), "event_kinds": []events.Kind{events.KindCommand, events.KindFileChange, events.KindGit, events.KindMCPCall, events.KindApproval, events.KindRollback}, "policy_decisions": []string{policy.DecisionAllow, policy.DecisionWarn, policy.DecisionApproval, policy.DecisionDeny}, "error_codes": []errorCode{invalidArgument, notFound, conflict, policyDenied, approvalRequired, unauthorized, integrityError, internalError}, "approval_support": true, "rollback_support": true, "policy_simulation": true, "policy_validation": true, "policy_trace": true, "policy_test_support": true}, nil
 	})
 	mcp.AddTool(server, &mcp.Tool{Name: "start_run", Description: "Start a run and optionally bind a safe automatic context"}, func(ctx context.Context, _ *mcp.CallToolRequest, input startRunInput) (*mcp.CallToolResult, startRunOutput, error) {
 		out, err := startRun(ctx, service, input)
@@ -543,17 +554,16 @@ func addPolicyApprovalTools(server *mcp.Server, s *audit.Service) {
 		if input.Kind == "" {
 			input.Kind = events.KindCommand
 		}
-		raw, _ := json.Marshal(map[string]any{"command": input.Command})
+		raw, _ := json.Marshal(map[string]any{"command": input.Command, "path": input.Path, "target": input.Target, "agent": input.Agent, "workspace": input.Workspace, "environment": input.Environment})
 		event := events.Event{SchemaVersion: 2, EventID: "evaluation", RunID: "evaluation", ActionID: "evaluation", Timestamp: time.Now().UTC(), Sequence: 1, Actor: events.Actor{Type: "agent", ID: "mcp-agent"}, Kind: input.Kind, Intent: input.Intent, Evidence: events.Evidence{Data: raw}, Risk: events.Risk{Level: events.RiskUnknown}, PolicyDecision: events.PolicyDecision{Status: events.PolicyNotEvaluated}, Reversibility: events.Reversibility{Status: events.NotApplicable}}
-		risk, decision, err := s.Policy.Evaluate(ctx, event)
-		source := ""
-		sources := s.Policy.Sources()
-		if len(sources) > 0 {
-			source = filepath.Base(sources[len(sources)-1])
+		result, err := s.Policy.Simulate(ctx, event)
+		if err != nil {
+			return nil, policyOutput{}, safeError(err)
 		}
-		return nil, policyOutput{risk.Level, decision.Status, decision.RuleID, decision.Reason, source}, safeError(err)
+		return nil, policyOutput{Risk: result.RiskLevel, Decision: policy.EventDecision(result.Decision), CanonicalDecision: result.Decision, MatchedRule: result.RuleID, Reason: result.Reason, Source: result.PolicySource, MatchedRules: result.MatchedRules, Trace: result.Trace, Fingerprint: result.PolicyFingerprint, RequiresApproval: result.RequiresApproval}, nil
 	}
 	mcp.AddTool(server, &mcp.Tool{Name: "evaluate_action", Description: "Evaluate an action without recording it"}, handler)
+	mcp.AddTool(server, &mcp.Tool{Name: "simulate_policy", Description: "Simulate policy preflight without creating audit or approval state"}, handler)
 	mcp.AddTool(server, &mcp.Tool{Name: "explain_policy", Description: "Explain the matching policy decision without exposing paths"}, handler)
 	mcp.AddTool(server, &mcp.Tool{Name: "request_approval", Description: "Request approval; this tool cannot approve its own request"}, func(ctx context.Context, _ *mcp.CallToolRequest, input approvalInput) (*mcp.CallToolResult, approvalOutput, error) {
 		out, err := requestApproval(ctx, s, input)

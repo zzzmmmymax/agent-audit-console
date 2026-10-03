@@ -54,7 +54,7 @@ func main() {
 	if !isLoopbackAddress(resolved.ListenAddress) && access == nil {
 		log.Fatal("refusing non-loopback listen address without --access-file or AGENT_AUDIT_ACCESS_FILE")
 	}
-	server := &http.Server{Addr: resolved.ListenAddress, Handler: api.NewWithAuth(service.Store, access, service.Ready), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
+	server := &http.Server{Addr: resolved.ListenAddress, Handler: api.NewWithPolicy(service.Store, service.Policy, access, service.Ready), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 	log.Printf("Agent Audit Console: http://%s", resolved.ListenAddress)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)

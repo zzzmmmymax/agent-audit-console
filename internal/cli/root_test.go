@@ -28,10 +28,34 @@ func TestVersionAndCommandHelp(t *testing.T) {
 	if !strings.Contains(stdout.String(), "Agent Audit Console") || !strings.Contains(stdout.String(), "v0.1.0-test") {
 		t.Fatalf("version output=%q", stdout.String())
 	}
-	for _, name := range []string{"run", "log", "show", "restore", "export", "access-token", "sync", "verify", "doctor", "version"} {
+	for _, name := range []string{"run", "log", "show", "restore", "export", "access-token", "sync", "verify", "doctor", "policy", "version"} {
 		command, _, err := root.Find([]string{name})
 		if err != nil || command.Short == "" {
 			t.Fatalf("command %s missing help: %v", name, err)
+		}
+	}
+}
+
+func TestPolicyCommands(t *testing.T) {
+	dataDir := t.TempDir()
+	service, err := audit.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.Close()
+	for _, args := range [][]string{
+		{"--data-dir", dataDir, "policy", "validate", "--json"},
+		{"--data-dir", dataDir, "policy", "simulate", "--action", "git_push", "--command", "git,push,origin,main", "--json"},
+		{"--data-dir", dataDir, "policy", "test", "--json"},
+	} {
+		var stdout, stderr bytes.Buffer
+		root := New(&stdout, &stderr)
+		root.SetArgs(args)
+		if err := root.Execute(); err != nil {
+			t.Fatalf("args=%v err=%v stdout=%s", args, err, stdout.String())
+		}
+		if !strings.Contains(stdout.String(), "\"") {
+			t.Fatalf("expected JSON: %s", stdout.String())
 		}
 	}
 }
