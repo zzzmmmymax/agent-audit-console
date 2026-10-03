@@ -33,13 +33,13 @@
   log safety, RBAC, and large-list bound.
 - **Backend Tests:** PASS — aggregation, explicit tests, event filters/search,
   cursor pagination, endpoints, verification, and RBAC regression.
-- **CI:** pending remote branch run at report authoring; final handoff records
-  Ubuntu, Windows, macOS, frontend, and Linux race results.
+- **CI:** PASS on implementation commit `c543e51` in run `37134159756` — Ubuntu,
+  Windows, macOS, frontend test/build, and the Linux race detector are green.
 - **Known Issues:** old records can display fields as unavailable when the
   evidence did not record them; integrity filtering verifies candidate runs and
   is intentionally more expensive; diff output is truncated in-browser rather
   than fetched in chunks; rollback execution is outside this UI.
 
-Stage 9 is complete when the pushed branch CI is green. `v0.2.0` remains in
-development; no merge, tag, or release is part of this stage.
+Stage 9 is complete. `v0.2.0` remains in development; no merge, tag, or release
+is part of this stage.
 
