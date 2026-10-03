@@ -531,7 +531,7 @@ func doctorCommand(stdout io.Writer, load configLoader, open serviceOpener) *cob
 		if resolved.RetentionDays == 0 {
 			fmt.Fprintln(stdout, "PASS retention: keep forever")
 		} else {
-			fmt.Fprintf(stdout, "WARN retention: %d days configured; automatic deletion is not enabled in v0.1.0\n", resolved.RetentionDays)
+			fmt.Fprintf(stdout, "WARN retention: %d days configured; automatic deletion is not enabled in v0.2.0\n", resolved.RetentionDays)
 		}
 		if _, err := os.Stat(resolved.AccessFile); err == nil {
 			if _, loadErr := auth.Load(resolved.AccessFile); loadErr != nil {
