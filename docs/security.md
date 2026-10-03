@@ -49,9 +49,18 @@ creates an immutable `approved` event; refusal or unavailable input creates a
 `rejected` event and cancels the run before process launch.
 
 Shared policy paths from `AGENT_AUDIT_TEAM_POLICY` are evaluated before local
-rules. This precedence prevents a local first-match rule from weakening the
-same operation, though filesystem administrators can still replace local
-configuration and binaries.
+rules. All matching rules are evaluated and the strictest decision wins, so a
+local rule cannot weaken a matching shared rule. Risk is computed independently
+as the highest matching assessment. Filesystem administrators can still replace
+local configuration and binaries.
+
+Policy simulation and validation treat all input as untrusted. Documents are
+strictly decoded and bounded by size, rule count, string length, and regex
+length; matchers use Go's RE2 engine. HTTP request bodies are separately
+bounded. Simulation is transient and cannot create approval, audit, rollback,
+filesystem, command, or network side effects. Actual actions are always
+evaluated again. Invalid reloads retain the last-known-good policy and surface a
+health warning; initial load failure is fail-safe.
 
 ## API access and remote sync
 

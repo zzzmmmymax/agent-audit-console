@@ -17,6 +17,11 @@ All notable changes to this project will be documented here.
   timelines, parent/child trace context, bounded command/diff evidence, risk and
   approval investigation panels, live integrity verification, rollback preview,
   deep links, and 10,000-event pagination.
+- YAML policy simulation and semantic validation, regression test cases, complete
+  deterministic rule traces, conflict warnings, and last-known-good reloads.
+- Canonical policy fingerprints and recorded-versus-current action explanation.
+- CLI `policy validate|simulate|explain|test`, MCP `simulate_policy`, viewer-safe
+  policy API routes, and the read-only Web Policy Inspector.
 
 ### Security
 
@@ -25,6 +30,9 @@ All notable changes to this project will be documented here.
 - MCP cannot self-approve or execute restore; rollback remains a pending request.
 - Web evidence is rendered as untrusted text; ANSI/control characters and large
   logs/diffs are bounded, and rollback preview does not expose object paths.
+- Policy and API inputs are bounded; Go RE2 matchers, strict YAML fields, rule
+  count/string limits, and fail-safe last-known-good behavior prevent allow-all
+  fallback on malformed reloads.
 
 ## v0.1.0 - 2026-10-03
 

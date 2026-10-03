@@ -46,6 +46,23 @@ full-operating-system monitor, sandbox, or replacement for endpoint security.
 - Viewer/operator/admin bearer-token RBAC with token digest storage.
 - Explicit HTTPS remote audit synchronization with idempotency keys.
 - `audit doctor` configuration and dependency diagnostics.
+- Deterministic policy simulation, validation, regression tests, rule traces,
+  canonical fingerprints, and recorded-versus-current explanations.
+- Read-only Web Policy Inspector and MCP `simulate_policy` preflight.
+
+## Policy preflight
+
+```shell
+audit policy validate
+audit policy simulate --action git_push --command git,push,origin,main
+audit policy test
+```
+
+All policy commands support `--json`. Simulation is read-only and a deny result
+still means the simulation itself completed successfully. See
+[Policy simulation](docs/policy-simulation.md),
+[Policy testing](docs/policy-testing.md), and
+[Policy explainability](docs/policy-explainability.md).
 
 ## Architecture
 
