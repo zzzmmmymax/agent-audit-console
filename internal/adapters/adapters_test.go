@@ -22,5 +22,12 @@ func TestBuiltinAdaptersNormalizeToCoreEvent(t *testing.T) {
 		if event.Actor.Metadata["adapter"] != name {
 			t.Fatalf("adapter=%s", event.Actor.Metadata["adapter"])
 		}
+		if value.Descriptor().Version != "2" || !value.Descriptor().SupportsSession || !value.Descriptor().SupportsToolCalls {
+			t.Fatalf("missing v2 capabilities for %s", name)
+		}
+		command, err := value.NormalizeCommand(Action{RunID: "run-1", Intent: "command"})
+		if err != nil || command.Kind != events.KindCommand {
+			t.Fatalf("normalize command: %v", err)
+		}
 	}
 }

@@ -84,9 +84,13 @@ const (
 // Event is the immutable audit record persisted by the system. PreviousHash
 // and IntegrityHash link events within a run. Hashes are lowercase SHA-256 hex.
 type Event struct {
+	SchemaVersion  int            `json:"schema_version,omitempty"`
 	EventID        string         `json:"event_id"`
 	RunID          string         `json:"run_id"`
 	ActionID       string         `json:"action_id"`
+	ParentActionID string         `json:"parent_action_id,omitempty"`
+	CorrelationID  string         `json:"correlation_id,omitempty"`
+	ActionStatus   ActionStatus   `json:"action_status,omitempty"`
 	Timestamp      time.Time      `json:"timestamp"`
 	Sequence       uint64         `json:"sequence"`
 	Actor          Actor          `json:"actor"`
@@ -129,6 +133,12 @@ func (e Event) Validate() error {
 	if strings.TrimSpace(e.ActionID) == "" {
 		problems = append(problems, "action_id is required")
 	}
+	if e.SchemaVersion != 0 && e.SchemaVersion != 1 && e.SchemaVersion != 2 {
+		problems = append(problems, fmt.Sprintf("unsupported schema_version %d", e.SchemaVersion))
+	}
+	if e.ActionStatus != "" && !ValidActionStatus(e.ActionStatus) {
+		problems = append(problems, fmt.Sprintf("unsupported action_status %q", e.ActionStatus))
+	}
 	if e.Timestamp.IsZero() {
 		problems = append(problems, "timestamp is required")
 	}
@@ -157,4 +167,13 @@ func (e Event) Validate() error {
 		return errors.New(strings.Join(problems, "; "))
 	}
 	return nil
+}
+
+func ValidActionStatus(value ActionStatus) bool {
+	switch value {
+	case ActionPlanned, ActionStarted, ActionCompleted, ActionFailed, ActionBlocked, ActionCancelled:
+		return true
+	default:
+		return false
+	}
 }

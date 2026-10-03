@@ -122,3 +122,17 @@ func TestLegacyDevelopmentHashRemainsVerifiable(t *testing.T) {
 		t.Fatalf("legacy chain rejected: %v", err)
 	}
 }
+
+func TestV2HashCoversCorrelationFields(t *testing.T) {
+	event := testEvent(1)
+	event.SchemaVersion = 2
+	event.CorrelationID = "original"
+	sealed, err := Seal(event, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed.CorrelationID = "tampered"
+	if err := VerifyChain([]Event{sealed}); err == nil {
+		t.Fatal("v2 correlation tampering was not detected")
+	}
+}

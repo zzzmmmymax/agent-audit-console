@@ -17,9 +17,13 @@ var ErrIntegrityMismatch = errors.New("event integrity hash mismatch")
 // hashPayload fixes the hashed field order and excludes IntegrityHash itself.
 // encoding/json sorts map keys, giving deterministic output for Actor.Metadata.
 type hashPayload struct {
+	SchemaVersion  int            `json:"schema_version,omitempty"`
 	EventID        string         `json:"event_id"`
 	RunID          string         `json:"run_id"`
 	ActionID       string         `json:"action_id"`
+	ParentActionID string         `json:"parent_action_id,omitempty"`
+	CorrelationID  string         `json:"correlation_id,omitempty"`
+	ActionStatus   ActionStatus   `json:"action_status,omitempty"`
 	Timestamp      string         `json:"timestamp"`
 	Sequence       uint64         `json:"sequence"`
 	Actor          Actor          `json:"actor"`
@@ -43,8 +47,15 @@ func ComputeIntegrityHash(event Event) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Version 1 is the exact v0.1.0 canonical payload. Version 2 adds
+	// lifecycle/correlation fields without changing verification of old rows.
+	if event.SchemaVersion == 0 || event.SchemaVersion == 1 {
+		return computeV1IntegrityHash(event, evidenceDigest)
+	}
 	payload := hashPayload{
-		EventID: event.EventID, RunID: event.RunID, ActionID: event.ActionID,
+		SchemaVersion: event.SchemaVersion,
+		EventID:       event.EventID, RunID: event.RunID, ActionID: event.ActionID,
+		ParentActionID: event.ParentActionID, CorrelationID: event.CorrelationID, ActionStatus: event.ActionStatus,
 		Timestamp: event.Timestamp.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"),
 		Sequence:  event.Sequence, Actor: event.Actor, Kind: event.Kind,
 		Intent: event.Intent, EvidenceDigest: evidenceDigest, References: event.Evidence.References, Risk: event.Risk,
@@ -54,6 +65,32 @@ func ComputeIntegrityHash(event Event) (string, error) {
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("marshal event hash payload: %w", err)
+	}
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:]), nil
+}
+
+func computeV1IntegrityHash(event Event, evidenceDigest string) (string, error) {
+	type v1Payload struct {
+		EventID        string         `json:"event_id"`
+		RunID          string         `json:"run_id"`
+		ActionID       string         `json:"action_id"`
+		Timestamp      string         `json:"timestamp"`
+		Sequence       uint64         `json:"sequence"`
+		Actor          Actor          `json:"actor"`
+		Kind           Kind           `json:"kind"`
+		Intent         string         `json:"intent"`
+		EvidenceDigest string         `json:"evidence_digest"`
+		References     []string       `json:"references,omitempty"`
+		Risk           Risk           `json:"risk"`
+		PolicyDecision PolicyDecision `json:"policy_decision"`
+		Reversibility  Reversibility  `json:"reversibility"`
+		PreviousHash   string         `json:"previous_hash"`
+	}
+	payload := v1Payload{event.EventID, event.RunID, event.ActionID, event.Timestamp.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"), event.Sequence, event.Actor, event.Kind, event.Intent, evidenceDigest, event.Evidence.References, event.Risk, event.PolicyDecision, event.Reversibility, event.PreviousHash}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
 	}
 	digest := sha256.Sum256(encoded)
 	return hex.EncodeToString(digest[:]), nil
@@ -114,6 +151,9 @@ func hashMatches(event Event) (bool, error) {
 	}
 	if event.IntegrityHash == expected {
 		return true, nil
+	}
+	if event.SchemaVersion >= 2 {
+		return false, nil
 	}
 	legacy, err := computeLegacyIntegrityHash(event)
 	return err == nil && event.IntegrityHash == legacy, err

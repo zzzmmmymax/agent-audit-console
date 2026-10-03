@@ -168,10 +168,17 @@ approval decisions, integrity state, and rollback records.
 
 `agent-audit-mcp` is a stdio MCP server exposing these tools:
 
-- `start_run`
-- `record_action`
-- `get_run_summary`
-- `request_rollback`
+- Run: `start_run`, `get_run`, `get_run_summary`, `finish_run`
+- Action: `plan_action`, `record_action`, `complete_action`, `fail_action`
+- Query: `list_runs`, `list_events`, `get_event`, `get_file_diff`
+- Policy/approval: `evaluate_action`, `explain_policy`, `request_approval`,
+  `get_approval_status`
+- Rollback: `preview_rollback`, `request_rollback`, `get_rollback_status`
+- Diagnostics: `health`, `capabilities`
+
+The original v0.1 tool names remain compatible. MCP v2 adds safe automatic run
+contexts, correlation, compact responses, cursor pagination, typed errors, and
+idempotency keys.
 
 Generic MCP client configuration:
 
@@ -190,6 +197,25 @@ Use the `.exe` filename on Windows. Set `AGENT_AUDIT_HOME` or add
 `--data-dir /path/to/data` to `args` when the MCP server and CLI must share a
 non-default data directory. Apply the equivalent MCP server registration in
 Codex, Claude Code, Cursor, or another MCP-compatible client.
+
+### Agent integration setup (v0.2 development)
+
+Setup is preview-only unless `--apply` is supplied:
+
+```shell
+audit setup codex --dry-run
+audit setup claude-code --dry-run
+audit setup cursor --dry-run
+audit setup codex --apply
+audit doctor
+```
+
+Setup parses, merges, validates, backs up, and atomically updates agent config
+without removing other MCP servers. Use `--config-path` for a nonstandard
+location. See the [Codex](docs/integrations/codex.md),
+[Claude Code](docs/integrations/claude-code.md),
+[Cursor](docs/integrations/cursor.md), and
+[custom agent](docs/integrations/custom-agent.md) guides.
 
 ## Agent Adapters
 

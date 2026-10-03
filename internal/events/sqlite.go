@@ -27,6 +27,10 @@ func OpenSQLite(path string) (*SQLiteStore, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
+	if err := prepareLegacy(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("prepare legacy schema: %w", err)
+	}
 	if _, err := db.Exec(SQLiteSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("initialize schema: %w", err)
@@ -36,6 +40,46 @@ func OpenSQLite(path string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("migrate schema: %w", err)
 	}
 	return &SQLiteStore{db: db}, nil
+}
+
+func prepareLegacy(db *sql.DB) error {
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='events'`).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		columns, err := tableColumns(db, "events")
+		if err != nil {
+			return err
+		}
+		for name, statement := range map[string]string{"parent_action_id": `ALTER TABLE events ADD COLUMN parent_action_id TEXT NOT NULL DEFAULT ''`, "correlation_id": `ALTER TABLE events ADD COLUMN correlation_id TEXT NOT NULL DEFAULT ''`, "action_status": `ALTER TABLE events ADD COLUMN action_status TEXT NOT NULL DEFAULT ''`, "schema_version": `ALTER TABLE events ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1`} {
+			if !columns[name] {
+				if _, err := db.Exec(statement); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='snapshots'`).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		columns, err := tableColumns(db, "snapshots")
+		if err != nil {
+			return err
+		}
+		if !columns["expected_exists"] {
+			if _, err := db.Exec(`ALTER TABLE snapshots ADD COLUMN expected_exists INTEGER CHECK (expected_exists IS NULL OR expected_exists IN (0, 1))`); err != nil {
+				return err
+			}
+		}
+		if !columns["expected_hash"] {
+			if _, err := db.Exec(`ALTER TABLE snapshots ADD COLUMN expected_hash TEXT CHECK (expected_hash IS NULL OR length(expected_hash) = 64)`); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func migrate(db *sql.DB) error {
@@ -53,9 +97,30 @@ func migrate(db *sql.DB) error {
 			return err
 		}
 	}
+	eventColumns, err := tableColumns(db, "events")
+	if err != nil {
+		return err
+	}
+	for name, statement := range map[string]string{
+		"parent_action_id": `ALTER TABLE events ADD COLUMN parent_action_id TEXT NOT NULL DEFAULT ''`,
+		"correlation_id":   `ALTER TABLE events ADD COLUMN correlation_id TEXT NOT NULL DEFAULT ''`,
+		"action_status":    `ALTER TABLE events ADD COLUMN action_status TEXT NOT NULL DEFAULT ''`,
+		"schema_version":   `ALTER TABLE events ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1`,
+	} {
+		if !eventColumns[name] {
+			if _, err := db.Exec(statement); err != nil {
+				return err
+			}
+		}
+	}
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL) STRICT;
 		INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
-		INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
+		INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+		CREATE INDEX IF NOT EXISTS idx_events_correlation ON events(correlation_id);
+		CREATE TABLE IF NOT EXISTS action_records (run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE RESTRICT, action_id TEXT NOT NULL, parent_action_id TEXT NOT NULL DEFAULT '', correlation_id TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, intent TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('planned','started','completed','failed','blocked','cancelled')), created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(run_id,action_id)) STRICT;
+		CREATE TABLE IF NOT EXISTS run_contexts (context_key TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE RESTRICT, updated_at TEXT NOT NULL) STRICT;
+		CREATE TABLE IF NOT EXISTS idempotency_keys (scope TEXT NOT NULL, key TEXT NOT NULL, response_json TEXT NOT NULL CHECK(json_valid(response_json)), created_at TEXT NOT NULL, PRIMARY KEY(scope,key)) STRICT;
+		INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (3, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
 	return err
 }
 
@@ -99,6 +164,9 @@ func (s *SQLiteStore) SchemaVersion(ctx context.Context) (int, error) {
 }
 
 func (s *SQLiteStore) CreateRun(ctx context.Context, run Run) error {
+	if !ValidRunStatus(run.Status) {
+		return fmt.Errorf("invalid run status %q", run.Status)
+	}
 	metadata, err := json.Marshal(run.Metadata)
 	if err != nil {
 		return err
@@ -110,7 +178,34 @@ func (s *SQLiteStore) CreateRun(ctx context.Context, run Run) error {
 }
 
 func (s *SQLiteStore) FinishRun(ctx context.Context, id, status string, at time.Time) error {
+	if !ValidRunStatus(status) || status == string(RunStatusCreated) || status == string(RunStatusRunning) {
+		return fmt.Errorf("invalid terminal run status %q", status)
+	}
 	result, err := s.db.ExecContext(ctx, `UPDATE runs SET status=?, ended_at=? WHERE run_id=?`, status, timeText(at), id)
+	if err != nil {
+		return err
+	}
+	return changed(result)
+}
+
+func (s *SQLiteStore) MergeRunMetadata(ctx context.Context, id string, updates map[string]string) error {
+	run, err := s.GetRun(ctx, id)
+	if err != nil {
+		return err
+	}
+	if run.Metadata == nil {
+		run.Metadata = map[string]string{}
+	}
+	for key, value := range updates {
+		if value != "" {
+			run.Metadata[key] = value
+		}
+	}
+	encoded, err := json.Marshal(run.Metadata)
+	if err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE runs SET metadata_json=? WHERE run_id=?`, string(encoded), id)
 	if err != nil {
 		return err
 	}
@@ -122,10 +217,28 @@ func (s *SQLiteStore) GetRun(ctx context.Context, id string) (Run, error) {
 }
 
 func (s *SQLiteStore) ListRuns(ctx context.Context, limit int) ([]Run, error) {
+	return s.ListRunsPage(ctx, "", limit)
+}
+
+func (s *SQLiteStore) ListRunsPage(ctx context.Context, before string, limit int) ([]Run, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, runSelect+` ORDER BY started_at DESC LIMIT ?`, limit)
+	statement := runSelect
+	args := []any{}
+	if before != "" {
+		parts := strings.SplitN(before, "|", 2)
+		if len(parts) == 2 {
+			statement += ` WHERE started_at < ? OR (started_at = ? AND run_id < ?)`
+			args = append(args, parts[0], parts[0], parts[1])
+		} else {
+			statement += ` WHERE started_at < ?`
+			args = append(args, before)
+		}
+	}
+	statement += ` ORDER BY started_at DESC, run_id DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -212,8 +325,11 @@ func (s *SQLiteStore) Append(ctx context.Context, event Event) (Event, error) {
 	if err != nil {
 		return Event{}, err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO events(event_id,run_id,action_id,timestamp,sequence,actor_json,kind,intent,evidence_json,risk_json,policy_decision_json,reversibility_json,previous_hash,integrity_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		event.EventID, event.RunID, event.ActionID, timeText(event.Timestamp), event.Sequence, string(actor), event.Kind, event.Intent, string(evidence), string(risk), string(decision), string(reversibility), event.PreviousHash, event.IntegrityHash)
+	if event.SchemaVersion == 0 {
+		event.SchemaVersion = 1
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO events(event_id,run_id,action_id,parent_action_id,correlation_id,action_status,schema_version,timestamp,sequence,actor_json,kind,intent,evidence_json,risk_json,policy_decision_json,reversibility_json,previous_hash,integrity_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		event.EventID, event.RunID, event.ActionID, event.ParentActionID, event.CorrelationID, event.ActionStatus, event.SchemaVersion, timeText(event.Timestamp), event.Sequence, string(actor), event.Kind, event.Intent, string(evidence), string(risk), string(decision), string(reversibility), event.PreviousHash, event.IntegrityHash)
 	if err != nil {
 		return Event{}, err
 	}
@@ -230,7 +346,7 @@ func (s *SQLiteStore) Append(ctx context.Context, event Event) (Event, error) {
 	return event, nil
 }
 
-const eventSelect = `SELECT event_id,run_id,action_id,timestamp,sequence,actor_json,kind,intent,evidence_json,risk_json,policy_decision_json,reversibility_json,previous_hash,integrity_hash FROM events`
+const eventSelect = `SELECT event_id,run_id,action_id,parent_action_id,correlation_id,action_status,schema_version,timestamp,sequence,actor_json,kind,intent,evidence_json,risk_json,policy_decision_json,reversibility_json,previous_hash,integrity_hash FROM events`
 
 func (s *SQLiteStore) ByID(ctx context.Context, id string) (Event, error) {
 	return scanEvent(s.db.QueryRowContext(ctx, eventSelect+` WHERE event_id=?`, id))
@@ -347,7 +463,7 @@ func (s *SQLiteStore) VerifyRun(ctx context.Context, id string) error {
 func scanEvent(row scanner) (Event, error) {
 	var item Event
 	var timestamp, actor, evidence, risk, decision, reversibility, kind string
-	if err := row.Scan(&item.EventID, &item.RunID, &item.ActionID, &timestamp, &item.Sequence, &actor, &kind, &item.Intent, &evidence, &risk, &decision, &reversibility, &item.PreviousHash, &item.IntegrityHash); err != nil {
+	if err := row.Scan(&item.EventID, &item.RunID, &item.ActionID, &item.ParentActionID, &item.CorrelationID, &item.ActionStatus, &item.SchemaVersion, &timestamp, &item.Sequence, &actor, &kind, &item.Intent, &evidence, &risk, &decision, &reversibility, &item.PreviousHash, &item.IntegrityHash); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return item, ErrNotFound
 		}
@@ -394,6 +510,9 @@ func (s *SQLiteStore) LatestSnapshot(ctx context.Context, path string) (Snapshot
 }
 func (s *SQLiteStore) SnapshotByID(ctx context.Context, id string) (SnapshotRecord, error) {
 	return scanSnapshot(s.db.QueryRowContext(ctx, snapshotSelect+` WHERE snapshot_id=?`, id))
+}
+func (s *SQLiteStore) SnapshotByRunPath(ctx context.Context, runID, path string) (SnapshotRecord, error) {
+	return scanSnapshot(s.db.QueryRowContext(ctx, snapshotSelect+` WHERE run_id=? AND file_path=? ORDER BY captured_at DESC LIMIT 1`, runID, path))
 }
 
 func (s *SQLiteStore) RollbackAvailability(ctx context.Context, runID string) (string, error) {
@@ -470,6 +589,90 @@ func (s *SQLiteStore) CompleteRollback(ctx context.Context, id, status string, r
 		return err
 	}
 	return changed(changedResult)
+}
+
+func (s *SQLiteStore) RollbackByID(ctx context.Context, id string) (RollbackRecord, error) {
+	var item RollbackRecord
+	var eventID, snapshotID, result, completed sql.NullString
+	var plan, requested string
+	err := s.db.QueryRowContext(ctx, `SELECT rollback_id,run_id,requested_by,target_event_id,target_snapshot_id,status,plan_json,result_json,requested_at,completed_at FROM rollback_records WHERE rollback_id=?`, id).Scan(&item.RollbackID, &item.RunID, &item.RequestedBy, &eventID, &snapshotID, &item.Status, &plan, &result, &requested, &completed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return item, ErrNotFound
+	}
+	if err != nil {
+		return item, err
+	}
+	item.TargetEventID, item.TargetSnapshotID = eventID.String, snapshotID.String
+	item.Plan, item.Result = json.RawMessage(plan), json.RawMessage(result.String)
+	item.RequestedAt, err = parseTime(requested)
+	if err != nil {
+		return item, err
+	}
+	if completed.Valid {
+		value, parseErr := parseTime(completed.String)
+		if parseErr != nil {
+			return item, parseErr
+		}
+		item.CompletedAt = &value
+	}
+	return item, nil
+}
+
+func (s *SQLiteStore) BindRunContext(ctx context.Context, key, runID string) error {
+	if strings.TrimSpace(key) == "" {
+		return errors.New("context key is required")
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO run_contexts(context_key,run_id,updated_at) VALUES(?,?,?) ON CONFLICT(context_key) DO UPDATE SET run_id=excluded.run_id,updated_at=excluded.updated_at`, key, runID, timeText(time.Now().UTC()))
+	return err
+}
+
+func (s *SQLiteStore) ResolveRunContext(ctx context.Context, key string) (string, error) {
+	var id string
+	err := s.db.QueryRowContext(ctx, `SELECT rc.run_id FROM run_contexts rc JOIN runs r ON r.run_id=rc.run_id WHERE rc.context_key=? AND r.status='running'`, key).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return id, err
+}
+
+func (s *SQLiteStore) GetIdempotency(ctx context.Context, scope, key string, target any) (bool, error) {
+	if key == "" {
+		return false, nil
+	}
+	var raw string
+	err := s.db.QueryRowContext(ctx, `SELECT response_json FROM idempotency_keys WHERE scope=? AND key=?`, scope, key).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, json.Unmarshal([]byte(raw), target)
+}
+
+func (s *SQLiteStore) PutIdempotency(ctx context.Context, scope, key string, response any) error {
+	if key == "" {
+		return nil
+	}
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO idempotency_keys(scope,key,response_json,created_at) VALUES(?,?,?,?)`, scope, key, string(encoded), timeText(time.Now().UTC()))
+	return err
+}
+
+func (s *SQLiteStore) UpsertAction(ctx context.Context, item ActionRecord) error {
+	if !ValidActionStatus(item.Status) {
+		return fmt.Errorf("invalid action status %q", item.Status)
+	}
+	now := time.Now().UTC()
+	if item.CreatedAt.IsZero() {
+		item.CreatedAt = now
+	}
+	item.UpdatedAt = now
+	_, err := s.db.ExecContext(ctx, `INSERT INTO action_records(run_id,action_id,parent_action_id,correlation_id,kind,intent,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(run_id,action_id) DO UPDATE SET parent_action_id=excluded.parent_action_id,correlation_id=excluded.correlation_id,kind=excluded.kind,intent=excluded.intent,status=excluded.status,updated_at=excluded.updated_at`, item.RunID, item.ActionID, item.ParentActionID, item.CorrelationID, item.Kind, item.Intent, item.Status, timeText(item.CreatedAt), timeText(item.UpdatedAt))
+	return err
 }
 
 func timeText(value time.Time) string           { return value.UTC().Format(time.RFC3339Nano) }

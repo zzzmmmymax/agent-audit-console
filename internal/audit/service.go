@@ -557,10 +557,50 @@ func (s *Service) Summary(ctx context.Context, runID string) (map[string]any, er
 		after = page[len(page)-1].Sequence
 	}
 	counts := map[string]int{}
+	riskCounts := map[string]int{}
+	actions := map[string]struct{}{}
+	files := map[string]struct{}{}
+	commands, tests, approvals := 0, 0, 0
 	for _, item := range items {
 		counts[string(item.Kind)]++
+		riskCounts[item.Risk.Level]++
+		actions[item.ActionID] = struct{}{}
+		switch item.Kind {
+		case events.KindCommand:
+			commands++
+			var value struct {
+				Command []string `json:"command"`
+			}
+			if json.Unmarshal(item.Evidence.Data, &value) == nil {
+				joined := strings.ToLower(strings.Join(value.Command, " "))
+				if strings.Contains(joined, " test") || strings.HasPrefix(joined, "go test") || strings.Contains(joined, "vitest") {
+					tests++
+				}
+			}
+		case events.KindFileChange:
+			var value struct {
+				Path string `json:"path"`
+			}
+			if json.Unmarshal(item.Evidence.Data, &value) == nil && value.Path != "" {
+				files[value.Path] = struct{}{}
+			}
+		case events.KindApproval:
+			approvals++
+		}
 	}
-	return map[string]any{"run": run, "event_count": len(items), "events_by_kind": counts, "integrity_valid": s.Store.VerifyRun(ctx, runID) == nil}, nil
+	duration := time.Since(run.StartedAt)
+	if run.EndedAt != nil {
+		duration = run.EndedAt.Sub(run.StartedAt)
+	}
+	rollbackAvailability, rollbackErr := s.Store.RollbackAvailability(ctx, runID)
+	if rollbackErr != nil {
+		rollbackAvailability = "unknown"
+	}
+	integrityStatus := "verified"
+	if err := s.Store.VerifyRun(ctx, runID); err != nil {
+		integrityStatus = "broken"
+	}
+	return map[string]any{"run": run, "status": run.Status, "agent": map[string]string{"type": run.AgentType, "id": run.AgentID}, "duration_ms": duration.Milliseconds(), "action_count": len(actions), "event_count": len(items), "events_by_kind": counts, "files_changed": len(files), "commands_executed": commands, "tests": tests, "risk_counts": riskCounts, "approvals": approvals, "rollback_availability": rollbackAvailability, "integrity_status": integrityStatus, "integrity_valid": integrityStatus == "verified"}, nil
 }
 func (s *Service) StringResult(result RunResult) string {
 	return fmt.Sprintf("run %s: %s, exit=%d, file_changes=%d", result.Run.RunID, result.Run.Status, result.ExitCode, result.Changes)

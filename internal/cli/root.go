@@ -19,6 +19,7 @@ import (
 	"github.com/agent-audit-console/agent-audit-console/internal/buildinfo"
 	runtimeconfig "github.com/agent-audit-console/agent-audit-console/internal/config"
 	"github.com/agent-audit-console/agent-audit-console/internal/events"
+	"github.com/agent-audit-console/agent-audit-console/internal/integrations"
 	"github.com/agent-audit-console/agent-audit-console/internal/syncclient"
 	"github.com/spf13/cobra"
 )
@@ -51,8 +52,49 @@ func New(stdout, stderr io.Writer) *cobra.Command {
 		return audit.OpenWithConfig(resolved)
 	}
 
-	root.AddCommand(versionCommand(stdout), runCommand(stdout, stderr, openService), logCommand(stdout, openService), showCommand(stdout, openService), restoreCommand(stdout, openService), exportCommand(stdout, openService), accessTokenCommand(stdout, loadConfig), syncCommand(stdout, loadConfig), verifyCommand(stdout, openService), doctorCommand(stdout, loadConfig, openService))
+	root.AddCommand(versionCommand(stdout), runCommand(stdout, stderr, openService), logCommand(stdout, openService), showCommand(stdout, openService), restoreCommand(stdout, openService), exportCommand(stdout, openService), accessTokenCommand(stdout, loadConfig), syncCommand(stdout, loadConfig), verifyCommand(stdout, openService), setupCommand(stdout, loadConfig), doctorCommand(stdout, loadConfig, openService))
 	return root
+}
+
+func setupCommand(stdout io.Writer, load configLoader) *cobra.Command {
+	setup := &cobra.Command{Use: "setup", Short: "Preview or apply an agent MCP integration"}
+	for _, value := range []integrations.Agent{integrations.Codex, integrations.ClaudeCode, integrations.Cursor} {
+		agent := value
+		var apply, dryRun, printOnly bool
+		var configPath, commandPath string
+		child := &cobra.Command{Use: string(agent), Short: "Configure Agent Audit MCP for " + string(agent), Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+			resolved, err := load()
+			if err != nil {
+				return err
+			}
+			args := []string{"--data-dir", resolved.DataDir}
+			plan, err := integrations.BuildPlan(agent, configPath, commandPath, args)
+			if err != nil {
+				return err
+			}
+			fmt.Fprint(stdout, integrations.Preview(plan))
+			if !apply || dryRun || printOnly {
+				fmt.Fprintln(stdout, "Preview only; use --apply to update the configuration.")
+				return nil
+			}
+			result, err := integrations.Apply(plan)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(stdout, "Applied atomically to %s\n", result.Plan.ConfigPath)
+			if result.BackupPath != "" {
+				fmt.Fprintf(stdout, "Backup: %s\n", result.BackupPath)
+			}
+			return nil
+		}}
+		child.Flags().BoolVar(&apply, "apply", false, "apply the configuration update")
+		child.Flags().BoolVar(&dryRun, "dry-run", false, "preview without modifying files")
+		child.Flags().BoolVar(&printOnly, "print", false, "print the proposed configuration change")
+		child.Flags().StringVar(&configPath, "config-path", "", "override the agent configuration path")
+		child.Flags().StringVar(&commandPath, "mcp-command", "", "absolute agent-audit-mcp executable path")
+		setup.AddCommand(child)
+	}
+	return setup
 }
 
 func versionCommand(stdout io.Writer) *cobra.Command {
@@ -354,6 +396,11 @@ func doctorCommand(stdout io.Writer, load configLoader, open serviceOpener) *cob
 			fmt.Fprintln(stdout, "PASS MCP: agent-audit-mcp found on PATH")
 		} else {
 			fmt.Fprintln(stdout, "WARN MCP: agent-audit-mcp not found on PATH")
+		}
+		fmt.Fprintln(stdout, "Agent Integration:")
+		for _, agent := range []integrations.Agent{integrations.Codex, integrations.ClaudeCode, integrations.Cursor} {
+			status, message := integrations.Check(agent, "")
+			fmt.Fprintf(stdout, "%s %s: %s\n", status, agent, message)
 		}
 		return nil
 	}}

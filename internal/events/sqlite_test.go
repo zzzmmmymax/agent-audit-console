@@ -53,6 +53,17 @@ func TestSQLiteRestartAndMigration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	legacy := strings.ReplaceAll(SQLiteSchema, "    expected_exists INTEGER CHECK (expected_exists IS NULL OR expected_exists IN (0, 1)),\n", "")
 	legacy = strings.ReplaceAll(legacy, "    expected_hash TEXT CHECK (expected_hash IS NULL OR length(expected_hash) = 64),\n", "")
+	for _, line := range []string{"    parent_action_id TEXT NOT NULL DEFAULT '',\n", "    correlation_id TEXT NOT NULL DEFAULT '',\n", "    action_status TEXT NOT NULL DEFAULT '' CHECK (action_status IN ('', 'planned', 'started', 'completed', 'failed', 'blocked', 'cancelled')),\n", "    schema_version INTEGER NOT NULL DEFAULT 1 CHECK (schema_version IN (1, 2)),\n", "CREATE INDEX IF NOT EXISTS idx_events_correlation ON events(correlation_id);\n"} {
+		legacy = strings.ReplaceAll(legacy, line, "")
+	}
+	if start := strings.Index(legacy, "CREATE TABLE IF NOT EXISTS action_records"); start >= 0 {
+		end := strings.Index(legacy[start:], "INSERT OR IGNORE INTO schema_migrations(version, applied_at)\nVALUES (1")
+		if end < 0 {
+			t.Fatal("legacy schema marker missing")
+		}
+		legacy = legacy[:start] + legacy[start+end:]
+	}
+	legacy = strings.ReplaceAll(legacy, "INSERT OR IGNORE INTO schema_migrations(version, applied_at)\nVALUES (3, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));\n", "")
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
@@ -69,12 +80,47 @@ func TestSQLiteRestartAndMigration(t *testing.T) {
 			t.Fatal(err)
 		}
 		version, err := store.SchemaVersion(context.Background())
-		if err != nil || version != 2 {
+		if err != nil || version != 3 {
 			t.Fatalf("version=%d err=%v", version, err)
 		}
 		if err := store.Close(); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestV1AndV2HashCompatibility(t *testing.T) {
+	store, err := OpenSQLite(filepath.Join(t.TempDir(), "audit.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	run := Run{RunID: "run-hash-versions", AgentType: "custom", AgentID: "test", Status: "running", WorkspacePath: t.TempDir(), StartedAt: time.Now().UTC()}
+	if err = store.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	v1 := testEvent(1)
+	v1.EventID = "event-v1"
+	v1.RunID = run.RunID
+	v1.Sequence = 0
+	v1.SchemaVersion = 1
+	if _, err = store.Append(ctx, v1); err != nil {
+		t.Fatal(err)
+	}
+	v2 := testEvent(1)
+	v2.EventID = "event-v2"
+	v2.RunID = run.RunID
+	v2.Sequence = 0
+	v2.SchemaVersion = 2
+	v2.ParentActionID = "parent"
+	v2.CorrelationID = "correlation"
+	v2.ActionStatus = ActionCompleted
+	if _, err = store.Append(ctx, v2); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.VerifyRun(ctx, run.RunID); err != nil {
+		t.Fatal(err)
 	}
 }
 
