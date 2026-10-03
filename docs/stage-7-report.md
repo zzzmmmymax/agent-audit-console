@@ -13,7 +13,7 @@ release.
 | README Public Readiness | PASS |
 | README Quick Start | PASS |
 | SECURITY.md | PASS |
-| Private Vulnerability Reporting | Documented; activation to be retried immediately after public transition |
+| Private Vulnerability Reporting | PASS — enabled after public transition |
 | CONTRIBUTING.md | PASS |
 | Apache-2.0 LICENSE | PASS — exact official text |
 | Bug Report Issue Form | PASS — YAML validated |
@@ -26,6 +26,7 @@ release.
 | Windows CI | PASS |
 | macOS CI | PASS |
 | Linux Race Detector | PASS |
+| Repository Visibility | PUBLIC |
 | Public Readiness | **READY** |
 
 ## README public readiness
@@ -50,8 +51,9 @@ out-of-scope reports without weakening real security boundaries, and documents
 the coordinated disclosure process without inventing an email address or SLA.
 
 The canonical private advisory URL is documented. GitHub's enablement endpoint
-returned Not Found while the repository was private, so enablement will be
-retried and verified immediately after changing visibility to public.
+was unavailable while the repository was private. Immediately after the public
+transition, the official endpoint returned HTTP 204 and Private Vulnerability
+Reporting was enabled successfully.
 
 CONTRIBUTING.md now covers setup, builds, the full test gate, code style,
 commits, pull requests, private security reporting, feature requests, and the
@@ -137,7 +139,12 @@ decision and is not required for Stage 7 public readiness.
 
 **PUBLIC READINESS: READY**
 
+**REPOSITORY VISIBILITY: PUBLIC**
+
+**STAGE 7: COMPLETE**
+
 All security, privacy, documentation, template, license, local-test, and final
-CI gates required before the visibility transition have passed. Repository
-visibility can be changed from private to public. Private vulnerability
-reporting must be enabled and verified immediately after that transition.
+CI gates required before the visibility transition passed. Repository
+visibility was changed from private to public, and Private Vulnerability
+Reporting was enabled immediately afterward. The v0.1.0 tag and Release were
+not changed.
