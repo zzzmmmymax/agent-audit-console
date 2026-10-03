@@ -1,0 +1,65 @@
+name: Feature request
+description: Propose a scoped improvement to Agent Audit Console
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe a concrete problem and use case. A submitted request does not imply a delivery commitment.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem cannot be solved well with the current release?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe the desired behavior without assuming a specific implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds or alternative designs have you considered?
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      options:
+        - audit CLI
+        - auditd / HTTP API
+        - Local Web Console
+        - MCP server
+        - Policy / approval
+        - Snapshot / restore
+        - Agent Adapter
+        - Remote sync
+        - Documentation / packaging
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: Who needs this and what workflow would it enable?
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and privacy considerations
+      description: Explain effects on local-first storage, credentials, snapshots, authorization, restore, or remote data.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add sanitized examples, diagrams, or links if useful.

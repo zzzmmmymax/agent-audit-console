@@ -6,8 +6,8 @@ Report date: 2026-10-03 (Asia/Shanghai)
 
 | Gate | Status |
 |---|---|
-| Current Directory | `D:\agent-audit-console` |
-| Git Top Level | `D:\agent-audit-console` |
+| Current Directory | Dedicated repository checkout (local path omitted) |
+| Git Top Level | Dedicated repository checkout (local path omitted) |
 | Independent Repository | YES — local `.git` directory and expected history verified |
 | Current Branch | `master` |
 | Current Commit | `HEAD` (the commit containing this report; resolve with `git rev-parse HEAD`) |
@@ -42,7 +42,7 @@ Report date: 2026-10-03 (Asia/Shanghai)
 
 The repository began Stage 5 on `master` with no commits, no remote, and all
 project files untracked. The initial commit and Stage 5 status commit were then
-created. The complete repository was moved to `D:\agent-audit-console`; its Git
+created. The complete repository was moved to a dedicated standalone checkout; its Git
 top level is that same directory, its local `.git` metadata is intact, and both
 expected commits remain in the history. It is not managed by a parent or shared
 repository.
@@ -129,7 +129,7 @@ notice. All six archive hashes match `checksums.txt`.
 The first dry run exposed the local Go toolchain path in binaries. This was
 classified as a release-security issue and fixed by adding `-trimpath` to all
 three GoReleaser builds in commit `0935d10`; CI was rerun and passed. The final
-snapshot contains neither `D:\agent-audit-console` nor the local user path.
+snapshot contains neither the original checkout path nor the local user path.
 
 The Windows amd64 snapshot archive was extracted to an isolated temporary
 directory. Its `audit version` reported snapshot version, commit, build time,

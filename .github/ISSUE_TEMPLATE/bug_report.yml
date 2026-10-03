@@ -1,0 +1,110 @@
+name: Bug report
+description: Report a reproducible problem in Agent Audit Console
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug. Do not use this form for security vulnerabilities; follow SECURITY.md instead.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Describe the problem clearly and concisely.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Include the output of `audit version` or the commit SHA.
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - Linux
+        - macOS
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: architecture
+    attributes:
+      label: Architecture
+      placeholder: amd64 or arm64
+    validations:
+      required: true
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Install method
+      options:
+        - GitHub release archive
+        - Built from source
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Command or component
+      options:
+        - audit CLI
+        - auditd / HTTP API
+        - Local Web Console
+        - MCP server
+        - Policy / approval
+        - Snapshot / restore
+        - Agent Adapter
+        - Remote sync
+        - Packaging / installation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest reproducible sequence of commands or actions.
+      placeholder: |
+        1. Run ...
+        2. Open ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Remove tokens, passwords, private keys, customer data, private paths, and sensitive audit content before pasting.
+      render: shell
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+  - type: checkboxes
+    id: sanitization
+    attributes:
+      label: Sensitive-data confirmation
+      options:
+        - label: I have removed secrets and sensitive data from this report.
+          required: true
