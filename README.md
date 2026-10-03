@@ -40,6 +40,8 @@ full-operating-system monitor, sandbox, or replacement for endpoint security.
 - JSON and self-contained HTML audit exports.
 - MCP server with run, action, summary, and rollback-request tools.
 - Embedded local React Web Console.
+- Web Audit Experience v2 with action-grouped timelines, investigation panels,
+  deep links, server-side filters, and bounded 10,000-event navigation.
 - Codex, Claude Code, Cursor, and custom Agent Adapters.
 - Viewer/operator/admin bearer-token RBAC with token digest storage.
 - Explicit HTTPS remote audit synchronization with idempotency keys.
@@ -66,7 +68,8 @@ Codex / Claude Code / Cursor / custom agent
 
 Audit data remains local unless an operator explicitly invokes remote sync.
 See [Architecture](docs/architecture.md), [Event Schema](docs/event-schema.md),
-and the [v0.1.0 Release Scope](docs/release-scope-v0.1.md).
+the [Web Console v2 guide](docs/web-console-v2.md), and the
+[v0.1.0 Release Scope](docs/release-scope-v0.1.md).
 
 ## Quick start
 

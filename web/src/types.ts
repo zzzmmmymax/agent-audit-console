@@ -1,0 +1,14 @@
+export type RiskLevel='low'|'medium'|'high'|'unknown';
+export type IntegrityStatus='verified'|'broken'|'unknown';
+export type RollbackStatus='available'|'partial'|'unavailable'|'unknown';
+export type Run={run_id:string;agent_type:string;agent_id:string;status:string;workspace_path:string;started_at:string;ended_at?:string;metadata?:Record<string,string>};
+export type AuditEvent={event_id:string;run_id:string;action_id:string;parent_action_id?:string;correlation_id?:string;action_status?:string;sequence:number;kind:string;intent:string;timestamp:string;actor?:{type:string;id:string;name?:string};evidence?:{data?:Record<string,unknown>};risk?:{level?:RiskLevel;score?:number;factors?:string[]};policy_decision?:{status?:string;rule_id?:string;reason?:string};reversibility?:{status?:string;reason?:string}};
+export type RunOverview={run:Run;repository?:string;branch?:string;duration_ms:number;action_count:number;event_count:number;files_changed:number;commands:number;tests:number;approval_count:number;pending_approvals:number;risk_counts:Record<string,number>;integrity_status:IntegrityStatus;rollback_status:RollbackStatus};
+export type RunDetail={run:Run;events:AuditEvent[];summary:RunOverview;integrity_status:IntegrityStatus;rollback_status:RollbackStatus;has_more:boolean;next_after:number};
+export type Principal={name:string;role:'viewer'|'operator'|'admin'};
+export type RollbackFile={snapshot_id:string;action_id:string;path:string;current_hash:string;target_hash:string;current_exists:boolean;target_exists:boolean;conflict:boolean;warnings:string[]};
+export type RollbackPreview={run_id:string;status:'available'|'unavailable';files:RollbackFile[]};
+export type VerifyResult={status:'verified'|'broken';message:string;sequence?:number;event_id?:string;reason?:string};
+export type RunListResponse={runs:RunOverview[];has_more:boolean;cursor:string};
+export type RunFilters={q:string;agent:string;status:string;risk:string;integrity:string;repository:string;from:string;to:string};
+export type EventFilters={q:string;kind:string;risk:string;status:string};

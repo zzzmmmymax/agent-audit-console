@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -34,6 +35,51 @@ func TestServerRunsAndStaticUI(t *testing.T) {
 		if response.StatusCode != http.StatusOK {
 			t.Fatalf("%s status=%d", path, response.StatusCode)
 		}
+	}
+}
+
+func TestWebAuditV2OverviewVerifyAndFilters(t *testing.T) {
+	store, err := events.OpenSQLite(filepath.Join(t.TempDir(), "audit.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	run := events.Run{RunID: "run-web-v2", AgentType: "codex", AgentID: "agent", Status: "running", WorkspacePath: t.TempDir(), StartedAt: time.Now().UTC(), Metadata: map[string]string{"repository": "owner/repo"}}
+	if err = store.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	event := events.Event{EventID: "event-v2", RunID: run.RunID, ActionID: "action-v2", ActionStatus: events.ActionFailed, Timestamp: time.Now().UTC(), Actor: events.Actor{Type: "agent", ID: "agent"}, Kind: events.KindCommand, Intent: "run secure tests", Evidence: events.Evidence{Data: json.RawMessage(`{"command":["go","test"],"category":"test"}`)}, Risk: events.Risk{Level: events.RiskHigh}, PolicyDecision: events.PolicyDecision{Status: events.PolicyAllowed}, Reversibility: events.Reversibility{Status: events.Irreversible}}
+	if _, err = store.Append(ctx, event); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(New(store))
+	defer server.Close()
+	for _, path := range []string{"/api/run-overviews?repository=owner%2Frepo&risk=high&q=owner", "/api/runs/run-web-v2?risk=high&status=failed&q=secure", "/api/runs/run-web-v2/rollback-preview"} {
+		response, err := http.Get(server.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("%s status=%d", path, response.StatusCode)
+		}
+	}
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/runs/run-web-v2/verify", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var result map[string]any
+	if err = json.NewDecoder(response.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result["status"] != "verified" {
+		t.Fatalf("verify=%v", result)
 	}
 }
 

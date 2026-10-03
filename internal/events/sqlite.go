@@ -374,6 +374,27 @@ func queryEvents(ctx context.Context, source rowQueryer, query Query) ([]Event, 
 		}
 		statement += ` AND kind IN (` + strings.Join(marks, ",") + `)`
 	}
+	if len(query.RiskLevels) > 0 {
+		marks := make([]string, len(query.RiskLevels))
+		for i, value := range query.RiskLevels {
+			marks[i] = "?"
+			args = append(args, value)
+		}
+		statement += ` AND json_extract(risk_json,'$.level') IN (` + strings.Join(marks, ",") + `)`
+	}
+	if len(query.ActionStatuses) > 0 {
+		marks := make([]string, len(query.ActionStatuses))
+		for i, value := range query.ActionStatuses {
+			marks[i] = "?"
+			args = append(args, value)
+		}
+		statement += ` AND action_status IN (` + strings.Join(marks, ",") + `)`
+	}
+	if search := strings.TrimSpace(query.Search); search != "" {
+		like := "%" + search + "%"
+		statement += ` AND (event_id LIKE ? OR action_id LIKE ? OR intent LIKE ? OR evidence_json LIKE ?)`
+		args = append(args, like, like, like, like)
+	}
 	statement += ` ORDER BY sequence LIMIT ?`
 	args = append(args, query.Limit)
 	rows, err := source.QueryContext(ctx, statement, args...)
