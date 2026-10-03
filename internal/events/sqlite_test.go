@@ -51,7 +51,8 @@ func TestSQLiteStoreAppendsAndVerifiesRun(t *testing.T) {
 
 func TestSQLiteRestartAndMigration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.db")
-	legacy := strings.ReplaceAll(SQLiteSchema, "    expected_exists INTEGER CHECK (expected_exists IS NULL OR expected_exists IN (0, 1)),\n", "")
+	legacy := strings.ReplaceAll(SQLiteSchema, "\r\n", "\n")
+	legacy = strings.ReplaceAll(legacy, "    expected_exists INTEGER CHECK (expected_exists IS NULL OR expected_exists IN (0, 1)),\n", "")
 	legacy = strings.ReplaceAll(legacy, "    expected_hash TEXT CHECK (expected_hash IS NULL OR length(expected_hash) = 64),\n", "")
 	for _, line := range []string{"    parent_action_id TEXT NOT NULL DEFAULT '',\n", "    correlation_id TEXT NOT NULL DEFAULT '',\n", "    action_status TEXT NOT NULL DEFAULT '' CHECK (action_status IN ('', 'planned', 'started', 'completed', 'failed', 'blocked', 'cancelled')),\n", "    schema_version INTEGER NOT NULL DEFAULT 1 CHECK (schema_version IN (1, 2)),\n", "CREATE INDEX IF NOT EXISTS idx_events_correlation ON events(correlation_id);\n"} {
 		legacy = strings.ReplaceAll(legacy, line, "")
