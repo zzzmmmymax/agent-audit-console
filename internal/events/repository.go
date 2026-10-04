@@ -5,10 +5,13 @@ import "context"
 // Query limits and filters event retrieval without binding the domain layer to
 // SQLite or an HTTP representation.
 type Query struct {
-	RunID string
-	Kinds []Kind
-	After uint64
-	Limit int
+	RunID          string
+	Kinds          []Kind
+	RiskLevels     []string
+	ActionStatuses []ActionStatus
+	Search         string
+	After          uint64
+	Limit          int
 }
 
 // Repository is the persistence boundary for immutable event records.

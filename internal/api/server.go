@@ -7,11 +7,15 @@ import (
 	"errors"
 	"io/fs"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/agent-audit-console/agent-audit-console/internal/auth"
+	"github.com/agent-audit-console/agent-audit-console/internal/capture"
 	"github.com/agent-audit-console/agent-audit-console/internal/events"
+	"github.com/agent-audit-console/agent-audit-console/internal/policy"
 	"github.com/agent-audit-console/agent-audit-console/internal/redact"
 	"github.com/go-chi/chi/v5"
 )
@@ -21,6 +25,7 @@ var staticFiles embed.FS
 
 type Server struct {
 	store     *events.SQLiteStore
+	policy    *policy.Engine
 	readiness func(context.Context) error
 	router    chi.Router
 }
@@ -28,11 +33,19 @@ type Server struct {
 func New(store *events.SQLiteStore) *Server { return NewWithAuth(store, nil) }
 
 func NewWithAuth(store *events.SQLiteStore, access *auth.Manager, readiness ...func(context.Context) error) *Server {
+	return newServer(store, nil, access, readiness...)
+}
+
+func NewWithPolicy(store *events.SQLiteStore, engine *policy.Engine, access *auth.Manager, readiness ...func(context.Context) error) *Server {
+	return newServer(store, engine, access, readiness...)
+}
+
+func newServer(store *events.SQLiteStore, engine *policy.Engine, access *auth.Manager, readiness ...func(context.Context) error) *Server {
 	check := store.Ready
 	if len(readiness) > 0 && readiness[0] != nil {
 		check = readiness[0]
 	}
-	s := &Server{store: store, readiness: check}
+	s := &Server{store: store, policy: engine, readiness: check}
 	r := chi.NewRouter()
 	r.Use(securityHeaders)
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -50,8 +63,15 @@ func NewWithAuth(store *events.SQLiteStore, access *auth.Manager, readiness ...f
 			r.Use(authorize(access, auth.RoleViewer))
 			r.Get("/whoami", s.whoami)
 			r.Get("/runs", s.runs)
+			r.Get("/run-overviews", s.runOverviews)
 			r.Get("/runs/{runID}", s.run)
+			r.Post("/runs/{runID}/verify", s.verifyRun)
+			r.Get("/runs/{runID}/rollback-preview", s.rollbackPreview)
 			r.Get("/events/{eventID}", s.event)
+			r.Get("/policy", s.policyInspection)
+			r.Post("/policy/simulate", s.policySimulate)
+			r.Post("/policy/validate", s.policyValidate)
+			r.Get("/runs/{runID}/actions/{actionID}/policy", s.policyExplain)
 		})
 		r.With(authorize(access, auth.RoleOperator)).Post("/runs/{runID}/rollback-requests", s.requestRollback)
 	})
@@ -109,6 +129,64 @@ func (s *Server) runs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
+func (s *Server) runOverviews(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	limit := int(parseUint(query.Get("limit"), 50))
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	filter := events.RunFilter{Agent: query.Get("agent"), Status: query.Get("status"), Risk: query.Get("risk"), Repository: query.Get("repository"), Search: boundedText(query.Get("q"), 256), StartedAfter: query.Get("from"), StartedBefore: query.Get("to"), Cursor: query.Get("cursor"), Limit: limit}
+	requestedIntegrity := query.Get("integrity")
+	filtered := make([]events.RunOverview, 0, limit+1)
+	for len(filtered) <= limit {
+		batchLimit := limit
+		if requestedIntegrity != "" {
+			batchLimit = 100
+		}
+		filter.Limit = batchLimit
+		items, err := s.store.ListRunOverviews(r.Context(), filter)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		available := len(items)
+		if available > batchLimit {
+			available = batchLimit
+		}
+		for _, item := range items[:available] {
+			item.IntegrityStatus = "verified"
+			if verifyErr := s.store.VerifyRun(r.Context(), item.Run.RunID); verifyErr != nil {
+				item.IntegrityStatus = "broken"
+			}
+			item.RollbackStatus, err = s.store.RollbackAvailability(r.Context(), item.Run.RunID)
+			if err != nil {
+				item.RollbackStatus = "unknown"
+			}
+			if requestedIntegrity == "" || item.IntegrityStatus == requestedIntegrity {
+				filtered = append(filtered, item)
+			}
+			if len(filtered) > limit {
+				break
+			}
+		}
+		if len(filtered) > limit || len(items) <= batchLimit {
+			break
+		}
+		last := items[batchLimit-1].Run
+		filter.Cursor = last.StartedAt.UTC().Format(time.RFC3339Nano) + "|" + last.RunID
+	}
+	hasMore := len(filtered) > limit
+	if hasMore {
+		filtered = filtered[:limit]
+	}
+	cursor := ""
+	if hasMore && len(filtered) > 0 {
+		last := filtered[len(filtered)-1].Run
+		cursor = last.StartedAt.UTC().Format(time.RFC3339Nano) + "|" + last.RunID
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"runs": filtered, "has_more": hasMore, "cursor": cursor})
+}
+
 func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "runID")
 	run, err := s.store.GetRun(r.Context(), id)
@@ -121,7 +199,11 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 	if limit < 1 || limit > 500 {
 		limit = 200
 	}
-	items, err := s.store.Query(r.Context(), events.Query{RunID: id, After: after, Limit: limit + 1})
+	query := r.URL.Query()
+	kinds := parseKinds(query.Get("kind"))
+	risks := splitValues(query.Get("risk"))
+	statuses := parseActionStatuses(query.Get("status"))
+	items, err := s.store.Query(r.Context(), events.Query{RunID: id, After: after, Limit: limit + 1, Kinds: kinds, RiskLevels: risks, ActionStatuses: statuses, Search: boundedText(query.Get("q"), 256)})
 	if err != nil {
 		writeError(w, err)
 		return
@@ -142,7 +224,75 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		rollbackStatus = "unknown"
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"run": run, "events": items, "has_more": hasMore, "next_after": nextAfter, "integrity_status": integrityStatus, "integrity_valid": integrityStatus == "verified", "rollback_status": rollbackStatus})
+	overviews, _ := s.store.ListRunOverviews(r.Context(), events.RunFilter{RunID: id, Limit: 1})
+	var summary any = map[string]any{}
+	if len(overviews) > 0 {
+		overviews[0].IntegrityStatus = integrityStatus
+		overviews[0].RollbackStatus = rollbackStatus
+		summary = overviews[0]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"run": run, "events": items, "summary": summary, "has_more": hasMore, "next_after": nextAfter, "integrity_status": integrityStatus, "integrity_valid": integrityStatus == "verified", "rollback_status": rollbackStatus})
+}
+
+func (s *Server) verifyRun(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "runID")
+	err := s.store.VerifyRun(r.Context(), id)
+	if err == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"status": "verified", "message": "Hash chain verified"})
+		return
+	}
+	if errors.Is(err, events.ErrNotFound) {
+		writeError(w, err)
+		return
+	}
+	response := map[string]any{"status": "broken", "message": "Audit evidence may have been modified or corrupted."}
+	var integrity *events.IntegrityError
+	if errors.As(err, &integrity) {
+		response["sequence"] = integrity.Sequence
+		response["event_id"] = integrity.EventID
+		response["reason"] = integrity.Reason
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) rollbackPreview(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "runID")
+	run, err := s.store.GetRun(r.Context(), id)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	items, err := s.store.ListSnapshotsByRun(r.Context(), id, 200)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	files := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		currentHash := ""
+		currentExists := false
+		warnings := []string{}
+		if !capture.IsWithin(run.WorkspacePath, item.FilePath) {
+			warnings = append(warnings, "Recorded path is outside the workspace")
+		} else if _, statErr := os.Lstat(item.FilePath); statErr == nil {
+			currentExists = true
+			if hash, hashErr := capture.HashFile(item.FilePath); hashErr == nil {
+				currentHash = hash
+			} else {
+				warnings = append(warnings, "Current file could not be hashed")
+			}
+		} else if !os.IsNotExist(statErr) {
+			warnings = append(warnings, "Current file state could not be read")
+		}
+		conflict := false
+		if item.ExpectedExists != nil {
+			conflict = currentExists != *item.ExpectedExists || (*item.ExpectedExists && currentHash != item.ExpectedHash)
+		} else {
+			warnings = append(warnings, "Legacy snapshot has no expected current state")
+		}
+		files = append(files, map[string]any{"snapshot_id": item.SnapshotID, "action_id": item.ActionID, "path": item.FilePath, "current_hash": currentHash, "target_hash": item.ContentHash, "current_exists": currentExists, "target_exists": item.Exists, "conflict": conflict, "warnings": warnings})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"run_id": id, "files": files, "status": map[bool]string{true: "available", false: "unavailable"}[len(files) > 0]})
 }
 
 func (s *Server) event(w http.ResponseWriter, r *http.Request) {
@@ -203,6 +353,103 @@ func (s *Server) requestRollback(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"rollback_id": record.RollbackID, "status": record.Status})
 }
 
+func (s *Server) policyInspection(w http.ResponseWriter, _ *http.Request) {
+	if s.policy == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "policy engine unavailable"})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.policy.Inspect())
+}
+
+type simulationInput struct {
+	Action      string         `json:"action"`
+	Kind        events.Kind    `json:"kind,omitempty"`
+	Command     []string       `json:"command,omitempty"`
+	Path        string         `json:"path,omitempty"`
+	Agent       string         `json:"agent,omitempty"`
+	Workspace   string         `json:"workspace,omitempty"`
+	Target      string         `json:"target,omitempty"`
+	Environment string         `json:"environment,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
+}
+
+func (s *Server) policySimulate(w http.ResponseWriter, r *http.Request) {
+	if s.policy == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "policy engine unavailable"})
+		return
+	}
+	var input simulationInput
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid simulation request"})
+		return
+	}
+	if input.Action == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action is required"})
+		return
+	}
+	if input.Kind == "" {
+		input.Kind = events.KindCommand
+	}
+	evidence, _ := json.Marshal(map[string]any{"command": input.Command, "path": input.Path, "agent": input.Agent, "workspace": input.Workspace, "target": input.Target, "environment": input.Environment, "parameters": input.Parameters})
+	result, err := s.policy.Simulate(r.Context(), events.Event{Kind: input.Kind, Intent: boundedText(input.Action, 4096), Evidence: events.Evidence{Data: evidence}, Reversibility: events.Reversibility{Status: events.NotApplicable}})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) policyValidate(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Document string `json:"document"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, policy.MaxPolicyBytes+4096))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid validation request"})
+		return
+	}
+	writeJSON(w, http.StatusOK, policy.ValidateDocument([]byte(input.Document)))
+}
+
+func (s *Server) policyExplain(w http.ResponseWriter, r *http.Request) {
+	if s.policy == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "policy engine unavailable"})
+		return
+	}
+	runID, actionID := chi.URLParam(r, "runID"), chi.URLParam(r, "actionID")
+	items, err := s.store.Query(r.Context(), events.Query{RunID: runID, Limit: 1000})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	var recorded *events.Event
+	for index := range items {
+		if items[index].ActionID == actionID {
+			item := items[index]
+			recorded = &item
+			break
+		}
+	}
+	if recorded == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "action not found"})
+		return
+	}
+	current, err := s.policy.Simulate(r.Context(), *recorded)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	fingerprint := recorded.PolicyDecision.PolicyFingerprint
+	writeJSON(w, http.StatusOK, map[string]any{
+		"recorded": map[string]any{"decision": recorded.PolicyDecision, "risk": recorded.Risk, "policy_fingerprint": fingerprint},
+		"current":  current, "re_evaluated": true,
+		"recorded_available": fingerprint != "", "policy_changed": fingerprint != "" && fingerprint != current.PolicyFingerprint,
+	})
+}
+
 func parseUint(value string, fallback uint64) uint64 {
 	if value == "" {
 		return fallback
@@ -212,6 +459,43 @@ func parseUint(value string, fallback uint64) uint64 {
 		return fallback
 	}
 	return parsed
+}
+
+func boundedText(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if len(value) > limit {
+		return value[:limit]
+	}
+	return value
+}
+func splitValues(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if item := strings.TrimSpace(part); item != "" {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+func parseKinds(value string) []events.Kind {
+	parts := splitValues(value)
+	result := make([]events.Kind, len(parts))
+	for i, item := range parts {
+		result[i] = events.Kind(item)
+	}
+	return result
+}
+func parseActionStatuses(value string) []events.ActionStatus {
+	parts := splitValues(value)
+	result := make([]events.ActionStatus, len(parts))
+	for i, item := range parts {
+		result[i] = events.ActionStatus(item)
+	}
+	return result
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

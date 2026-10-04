@@ -22,6 +22,42 @@ type Run struct {
 	Metadata      map[string]string `json:"metadata,omitempty"`
 }
 
+type RunStatus string
+
+const (
+	RunStatusCreated   RunStatus = "created"
+	RunStatusRunning   RunStatus = "running"
+	RunStatusCompleted RunStatus = "completed"
+	RunStatusFailed    RunStatus = "failed"
+	RunStatusCancelled RunStatus = "cancelled"
+)
+
+func ValidRunStatus(value string) bool {
+	switch RunStatus(value) {
+	case RunStatusCreated, RunStatusRunning, RunStatusCompleted, RunStatusFailed, RunStatusCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+type ActionStatus string
+
+const (
+	ActionPlanned   ActionStatus = "planned"
+	ActionStarted   ActionStatus = "started"
+	ActionCompleted ActionStatus = "completed"
+	ActionFailed    ActionStatus = "failed"
+	ActionBlocked   ActionStatus = "blocked"
+	ActionCancelled ActionStatus = "cancelled"
+)
+
+type ActionRecord struct {
+	RunID, ActionID, ParentActionID, CorrelationID, Kind, Intent string
+	Status                                                       ActionStatus
+	CreatedAt, UpdatedAt                                         time.Time
+}
+
 type SnapshotRecord struct {
 	SnapshotID, RunID, ActionID, FilePath string
 	Exists                                bool

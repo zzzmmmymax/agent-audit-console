@@ -1,0 +1,14 @@
+version: 1
+cases:
+  - name: ordinary command allowed
+    action: test
+    command: [go, test, ./...]
+    expect: {risk: low, decision: allow}
+  - name: protected push requires approval
+    action: git_push
+    command: [git, push, origin, main]
+    expect: {risk: high, decision: require_approval}
+  - name: production delete denied
+    action: delete_file
+    command: [rm, /prod/config]
+    expect: {risk: high, decision: deny}

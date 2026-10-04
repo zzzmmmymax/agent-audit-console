@@ -2,6 +2,65 @@
 
 All notable changes to this project will be documented here.
 
+## v0.2.0 - 2026-10-04
+
+### Added
+
+- MCP v2 run/action lifecycles, automatic run contexts, correlation, discovery,
+  policy explanation, approval status, rollback preview, bounded pagination,
+  compact responses, stable errors, and idempotency.
+- Agent Adapter v2 capability descriptors and normalized integration entry points.
+- Safe `audit setup` flows for Codex, Claude Code, and Cursor, with `audit doctor`
+  integration diagnostics.
+- Event schema v2 and migration 3 while preserving v0.1 hash verification.
+- Web Audit Experience v2 with server-filtered run search, action-grouped session
+  timelines, parent/child trace context, bounded command/diff evidence, risk and
+  approval investigation panels, live integrity verification, rollback preview,
+  deep links, and 10,000-event pagination.
+- YAML policy simulation and semantic validation, regression test cases, complete
+  deterministic rule traces, conflict warnings, and last-known-good reloads.
+- Canonical policy fingerprints and recorded-versus-current action explanation.
+- CLI `policy validate|simulate|explain|test`, MCP `simulate_policy`, viewer-safe
+  policy API routes, and the read-only Web Policy Inspector.
+
+### Security
+
+- Setup merges instead of overwriting, refuses malformed configuration, keeps
+  bounded backups, and writes atomically.
+- MCP cannot self-approve or execute restore; rollback remains a pending request.
+- Web evidence is rendered as untrusted text; ANSI/control characters and large
+  logs/diffs are bounded, and rollback preview does not expose object paths.
+- Policy and API inputs are bounded; Go RE2 matchers, strict YAML fields, rule
+  count/string limits, and fail-safe last-known-good behavior prevent allow-all
+  fallback on malformed reloads.
+
+### Improved
+
+- Session timelines group action lifecycles and parent/child correlation while
+  keeping command output, file diffs, and large pages bounded.
+- Risk, approval, integrity, and rollback investigation surfaces now expose
+  recorded evidence and current read-only policy simulation separately.
+
+### Compatibility
+
+- v0.1 databases migrate automatically to schema 3 without deleting audit data.
+- v0.1 event hashes, snapshots, CLI commands, MCP tool names, and YAML decision
+  aliases remain supported.
+
+### Performance
+
+- A 1,000-rule policy simulation measured 218,027 ns/op on the Stage 10 Windows
+  benchmark host; 10,000-event Web navigation remains server-paginated.
+
+### Known limitations
+
+- This is integrated-operation auditing, not OS-level EDR; external effects may
+  not be reversible.
+- There is no native Codex sidebar, full historical policy snapshot diff, or Web
+  policy editor. Static shadow detection only reports reliably identical matchers.
+- Large browser diffs are truncated, and a rollback request does not itself
+  execute a restore.
+
 ## v0.1.0 - 2026-10-03
 
 ### Added

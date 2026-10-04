@@ -3,6 +3,7 @@
 /audit.exe
 /auditd
 /auditd.exe
+/audit-demo-data.exe
 /bin/
 *.test
 *.out
@@ -41,6 +42,7 @@ node_modules/
 /web/dist/
 /coverage/
 coverage/
+/.tmp/
 *.tsbuildinfo
 /web/vite.config.js
 /web/vite.config.d.ts

@@ -11,7 +11,7 @@ Agent Audit Console records and reviews operations performed through supported
 CLI, MCP, and Agent Adapter integrations, including shell commands, file
 changes, Git activity, approvals, and rollback evidence.
 
-- **Current release:** [v0.1.0](https://github.com/zzzmmmymax/agent-audit-console/releases/tag/v0.1.0)
+- **Current release:** [v0.2.0](https://github.com/zzzmmmymax/agent-audit-console/releases/tag/v0.2.0)
 - **License:** [Apache License 2.0](LICENSE)
 - **Platforms:** Windows, Linux, and macOS on amd64 and arm64
 
@@ -28,7 +28,7 @@ interact with Git. Agent Audit Console focuses on four questions:
 It is an Agent audit and control tool. It is **not** an EDR, antivirus,
 full-operating-system monitor, sandbox, or replacement for endpoint security.
 
-## Features in v0.1.0
+## Features in v0.2.0
 
 - Local-first SQLite/WAL audit event storage.
 - Shell command, file change, and Git operation tracking.
@@ -40,10 +40,29 @@ full-operating-system monitor, sandbox, or replacement for endpoint security.
 - JSON and self-contained HTML audit exports.
 - MCP server with run, action, summary, and rollback-request tools.
 - Embedded local React Web Console.
+- Web Audit Experience v2 with action-grouped timelines, investigation panels,
+  deep links, server-side filters, and bounded 10,000-event navigation.
 - Codex, Claude Code, Cursor, and custom Agent Adapters.
 - Viewer/operator/admin bearer-token RBAC with token digest storage.
 - Explicit HTTPS remote audit synchronization with idempotency keys.
 - `audit doctor` configuration and dependency diagnostics.
+- Deterministic policy simulation, validation, regression tests, rule traces,
+  canonical fingerprints, and recorded-versus-current explanations.
+- Read-only Web Policy Inspector and MCP `simulate_policy` preflight.
+
+## Policy preflight
+
+```shell
+audit policy validate
+audit policy simulate --action git_push --command git,push,origin,main
+audit policy test
+```
+
+All policy commands support `--json`. Simulation is read-only and a deny result
+still means the simulation itself completed successfully. See
+[Policy simulation](docs/policy-simulation.md),
+[Policy testing](docs/policy-testing.md), and
+[Policy explainability](docs/policy-explainability.md).
 
 ## Architecture
 
@@ -66,14 +85,15 @@ Codex / Claude Code / Cursor / custom agent
 
 Audit data remains local unless an operator explicitly invokes remote sync.
 See [Architecture](docs/architecture.md), [Event Schema](docs/event-schema.md),
-and the [v0.1.0 Release Scope](docs/release-scope-v0.1.md).
+the [Web Console v2 guide](docs/web-console-v2.md), and the
+[v0.2.0 release notes](docs/release-notes-v0.2.0.md).
 
 ## Quick start
 
 ### A. Download a release
 
 1. Download the archive for your operating system and architecture from the
-   [v0.1.0 release](https://github.com/zzzmmmymax/agent-audit-console/releases/tag/v0.1.0).
+   [v0.2.0 release](https://github.com/zzzmmmymax/agent-audit-console/releases/tag/v0.2.0).
 2. Verify it against `checksums.txt` and extract the archive.
 3. Put the extracted directory on `PATH`, or run the binaries from that
    directory.
@@ -168,10 +188,17 @@ approval decisions, integrity state, and rollback records.
 
 `agent-audit-mcp` is a stdio MCP server exposing these tools:
 
-- `start_run`
-- `record_action`
-- `get_run_summary`
-- `request_rollback`
+- Run: `start_run`, `get_run`, `get_run_summary`, `finish_run`
+- Action: `plan_action`, `record_action`, `complete_action`, `fail_action`
+- Query: `list_runs`, `list_events`, `get_event`, `get_file_diff`
+- Policy/approval: `evaluate_action`, `explain_policy`, `request_approval`,
+  `get_approval_status`, `simulate_policy`
+- Rollback: `preview_rollback`, `request_rollback`, `get_rollback_status`
+- Diagnostics: `health`, `capabilities`
+
+The original v0.1 tool names remain compatible. MCP v2 adds safe automatic run
+contexts, correlation, compact responses, cursor pagination, typed errors, and
+idempotency keys.
 
 Generic MCP client configuration:
 
@@ -190,6 +217,25 @@ Use the `.exe` filename on Windows. Set `AGENT_AUDIT_HOME` or add
 `--data-dir /path/to/data` to `args` when the MCP server and CLI must share a
 non-default data directory. Apply the equivalent MCP server registration in
 Codex, Claude Code, Cursor, or another MCP-compatible client.
+
+### Agent integration setup
+
+Setup is preview-only unless `--apply` is supplied:
+
+```shell
+audit setup codex --dry-run
+audit setup claude-code --dry-run
+audit setup cursor --dry-run
+audit setup codex --apply
+audit doctor
+```
+
+Setup parses, merges, validates, backs up, and atomically updates agent config
+without removing other MCP servers. Use `--config-path` for a nonstandard
+location. See the [Codex](docs/integrations/codex.md),
+[Claude Code](docs/integrations/claude-code.md),
+[Cursor](docs/integrations/cursor.md), and
+[custom agent](docs/integrations/custom-agent.md) guides.
 
 ## Agent Adapters
 
@@ -214,25 +260,26 @@ native UI integration with those products.
 
 ## Policy and approvals
 
-The first startup creates `policy.yaml`. The actual v0.1.0 rule schema matches
+The first startup creates `policy.yaml`. The v0.2.0 rule schema matches
 event kinds and command regular expressions and produces a risk and decision:
 
 ```yaml
 version: 1
 default:
   risk: low
-  decision: allowed
+  decision: allow
 rules:
   - id: git-push
     description: Publishing commits changes remote state.
     command_regex: '(?i)(^|\s)git(?:\.exe)?\s+push(?:\s|$)'
     risk: high
-    decision: pending
+    decision: require_approval
 ```
 
-High-risk pending commands require interactive confirmation or the explicit
+Approval-required commands require interactive confirmation or the explicit
 `--approve-high-risk` automation flag. Team-policy files are evaluated before
-local rules and merge toward the stricter result.
+local rules and merge toward the stricter result. The legacy `allowed`,
+`pending`, and `rejected` values continue to load as compatibility aliases.
 
 ## Configuration
 
@@ -253,7 +300,7 @@ default**. Select a YAML file with `--config` or `AGENT_AUDIT_CONFIG`.
 | Retention days | `AGENT_AUDIT_RETENTION_DAYS` | `retention_days` | `0` (keep forever) |
 
 Nonzero retention is reported by `audit doctor`; automatic evidence deletion
-is intentionally disabled in v0.1.0.
+is intentionally disabled in v0.2.0.
 
 ## RBAC and API
 
@@ -269,8 +316,16 @@ The plaintext token is displayed once; only its SHA-256 digest is stored.
 `admin` is reserved for administrative capabilities. See the complete
 [RBAC matrix](docs/rbac.md).
 
-The v0.1.0 browser UI has no token-login flow. Protected mode targets API
+The browser UI has no token-login flow. Protected mode targets API
 clients; normal local Web use should remain loopback-only.
+
+## Upgrading from v0.1.x
+
+Install the v0.2.0 binaries and point them at the existing data directory.
+Startup applies the database migration automatically; existing runs, events,
+snapshots, diffs, and hash chains remain available. The v0.1 CLI commands and
+MCP tool names remain compatible, and legacy policy decisions continue to
+load. Do not delete or reinitialize the data directory before upgrading.
 
 ## Security model
 
@@ -292,14 +347,14 @@ Protect the data directory with operating-system permissions. See
 2. Operations outside supported CLI, MCP, or Adapter boundaries may not be
    recorded.
 3. External side effects may not be automatically reversible.
-4. A native Codex Sidebar or Audit Card is not part of v0.1.0.
-5. Token-protected browser login and automatic retention deletion are deferred.
-6. GitHub Actions may emit non-blocking Node.js runtime deprecation warnings
-   for current official action versions.
-
-v0.1.0 is the first public release. Its documented safety boundaries are
-enforced and its release gates pass, but interfaces and storage migrations may
-continue to evolve in later versions.
+4. A native Codex Sidebar or Audit Card is not included.
+5. Full historical policy snapshots are not stored, so fingerprint changes do
+   not provide a full historical policy diff.
+6. Static policy shadow detection is limited to reliably identical matchers.
+7. The Web Policy Inspector does not edit or save policy files.
+8. Large diffs are truncated in the browser; persisted evidence is unchanged.
+9. A rollback request records intent and does not mean restore was executed.
+10. Token-protected browser login and automatic retention deletion are deferred.
 
 ## Development
 
